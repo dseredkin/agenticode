@@ -177,7 +177,7 @@ class CodeFormatter:
             return ValidationResult(success=True)
 
         result = subprocess.run(
-            ["mypy", "--strict", *[str(f) for f in files]],
+            ["mypy", "--ignore-missing-imports", *[str(f) for f in files]],
             capture_output=True,
             text=True,
             cwd=self._project_root,

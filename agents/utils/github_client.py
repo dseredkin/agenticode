@@ -146,7 +146,10 @@ class GitHubClient:
             File content as string, or None if file doesn't exist.
         """
         try:
-            content = self._repo.get_contents(path, ref=ref)
+            if ref:
+                content = self._repo.get_contents(path, ref=ref)
+            else:
+                content = self._repo.get_contents(path)
             if isinstance(content, list):
                 return None
             return content.decoded_content.decode("utf-8")

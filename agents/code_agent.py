@@ -256,6 +256,9 @@ class CodeAgent:
             validated_files.append(file)
 
         success = len(all_errors) == 0
+        if all_errors:
+            for err in all_errors:
+                logger.debug(f"Validation error: {err}")
         return IterationResult(
             iteration=iteration,
             files=validated_files,
