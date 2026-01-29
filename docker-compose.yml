@@ -15,7 +15,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
-    command: python -m agents.code_agent --issue ${ISSUE_NUMBER:-1}
+    command: uv run python -m agents.code_agent --issue ${ISSUE_NUMBER:-1}
 
   reviewer-agent:
     build: .
@@ -31,4 +31,4 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
-    command: python -m agents.reviewer_agent --pr ${PR_NUMBER:-1}
+    command: uv run python -m agents.reviewer_agent --pr ${PR_NUMBER:-1}

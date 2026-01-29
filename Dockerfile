@@ -4,14 +4,18 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-COPY . .
-
+ENV UV_SYSTEM_PYTHON=1
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "agents.code_agent"]
+COPY pyproject.toml .
+RUN uv sync --no-dev
+
+COPY . .
+
+CMD ["uv", "run", "python", "-m", "agents.code_agent"]

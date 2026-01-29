@@ -11,8 +11,17 @@ GitHub-Native SDLC Automation System that automates the software development lif
 
 ## Installation
 
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+
 ```bash
-pip install -r requirements.txt
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv sync
+
+# Install with dev dependencies
+uv sync --dev
 ```
 
 ## Configuration
@@ -42,7 +51,7 @@ Required environment variables:
 Generate code from a GitHub issue:
 
 ```bash
-python -m agents.code_agent --issue 123
+uv run python -m agents.code_agent --issue 123
 ```
 
 Options:
@@ -54,7 +63,7 @@ Options:
 Review a pull request:
 
 ```bash
-python -m agents.reviewer_agent --pr 456
+uv run python -m agents.reviewer_agent --pr 456
 ```
 
 Options:
@@ -94,20 +103,30 @@ The system includes three workflows:
 ### Running Tests
 
 ```bash
-pytest tests/ -v
+uv run pytest tests/ -v
 ```
 
 ### Code Quality
 
 ```bash
 # Format code
-black agents/ tests/
+uv run black agents/ tests/
 
 # Lint code
-ruff check agents/ tests/
+uv run ruff check agents/ tests/
 
 # Type check
-mypy agents/
+uv run mypy agents/
+```
+
+### Adding Dependencies
+
+```bash
+# Add a runtime dependency
+uv add package-name
+
+# Add a dev dependency
+uv add --dev package-name
 ```
 
 ## Architecture
