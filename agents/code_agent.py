@@ -354,6 +354,7 @@ class CodeAgent:
             "neither", "not", "only", "own", "same", "than", "too",
             "very", "just", "also", "now", "add", "create", "implement",
             "fix", "update", "change", "modify", "new", "feature",
+            "that", "this", "these", "those", "which", "what", "who",
         }
         keywords = [w for w in words if w.lower() not in stopwords and len(w) > 2]
         return list(dict.fromkeys(keywords))[:20]
