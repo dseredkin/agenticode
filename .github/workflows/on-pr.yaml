@@ -1,0 +1,71 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yaml
+
+  review:
+    runs-on: ubuntu-latest
+    needs: ci
+    if: contains(github.event.pull_request.title, 'feat:') || contains(github.event.pull_request.labels.*.name, 'auto-review')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Reviewer Agent
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+          YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+        run: |
+          python -m agents.reviewer_agent --pr ${{ github.event.pull_request.number }} --no-wait-ci --output-json > result.json
+          cat result.json
+
+      - name: Handle review result
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let result;
+            try {
+              result = JSON.parse(fs.readFileSync('result.json', 'utf8'));
+            } catch (e) {
+              console.log('Failed to parse result:', e);
+              return;
+            }
+
+            if (!result.success) {
+              console.log('Review failed:', result.error);
+              return;
+            }
+
+            const decision = result.decision;
+            if (decision.status === 'REQUEST_CHANGES' && decision.issues.length > 0) {
+              // Add label for re-generation
+              github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: ['needs-revision']
+              });
+            }

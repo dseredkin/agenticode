@@ -1,0 +1,34 @@
+services:
+  code-agent:
+    build: .
+    environment:
+      - GITHUB_TOKEN
+      - GITHUB_REPOSITORY
+      - LLM_PROVIDER
+      - LLM_MODEL
+      - OPENAI_API_KEY
+      - GROK_API_KEY
+      - YANDEX_API_KEY
+      - YANDEX_FOLDER_ID
+      - MAX_ITERATIONS
+      - ITERATION_TIMEOUT
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    command: python -m agents.code_agent --issue ${ISSUE_NUMBER:-1}
+
+  reviewer-agent:
+    build: .
+    environment:
+      - GITHUB_TOKEN
+      - GITHUB_REPOSITORY
+      - LLM_PROVIDER
+      - LLM_MODEL
+      - OPENAI_API_KEY
+      - GROK_API_KEY
+      - YANDEX_API_KEY
+      - YANDEX_FOLDER_ID
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    command: python -m agents.reviewer_agent --pr ${PR_NUMBER:-1}
