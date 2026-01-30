@@ -83,9 +83,6 @@ class GitHubClient:
         self._installation_id = installation_id
         self._repository = repository or os.environ.get("GITHUB_REPOSITORY", "")
 
-        if not self._repository:
-            raise ValueError("Repository is required (format: owner/repo)")
-
         # Try installation-based auth first if installation_id provided
         if installation_id:
             self._token = self._get_installation_token(installation_id)
@@ -94,6 +91,8 @@ class GitHubClient:
 
         if not self._token:
             raise ValueError("GitHub token is required")
+        if not self._repository:
+            raise ValueError("Repository is required (format: owner/repo)")
 
         auth = Auth.Token(self._token)
         self._github = Github(auth=auth)
