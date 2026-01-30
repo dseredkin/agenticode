@@ -191,7 +191,7 @@ agenticode/
 │   ├── reviewer_agent.py       # Automated PR review
 │   ├── issue_moderator.py      # Issue classification
 │   ├── interaction_orchestrator.py  # Full review cycle
-│   ├── task_queue.py           # Task queue (Huey/SQLite)
+│   ├── task_queue.py           # Task queue (Huey/Redis)
 │   └── utils/
 │       ├── github_client.py    # GitHub API
 │       ├── llm_client.py       # LLM client (OpenAI/Grok/Yandex)

@@ -14,7 +14,7 @@ dependencies = [
     "pyjwt[crypto]>=2.10.1",
     "flask>=3.0.0",
     "gunicorn>=21.0.0",
-    "huey>=2.5.0",
+    "huey[redis]>=2.5.0",
     "flask-limiter>=3.5.0",
 ]
 

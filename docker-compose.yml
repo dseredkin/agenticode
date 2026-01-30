@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
   # Simple deployment: webhook-server with embedded worker (single instance)
   webhook-server:
     build: .
@@ -19,10 +28,10 @@ services:
       - MAX_REVIEW_ROUNDS
       - WEBHOOK_SECRET
       - WEBHOOK_PORT=8000
-      - HUEY_DB_PATH=/app/data/huey.db
+      - REDIS_URL=redis://redis:6379/0
       - ENABLE_EMBEDDED_WORKER=true
-    volumes:
-      - huey_data:/app/data
+    depends_on:
+      - redis
     command: uv run python webhook_server.py
     restart: unless-stopped
 
@@ -42,10 +51,10 @@ services:
       - YANDEX_API_KEY
       - YANDEX_FOLDER_ID
       - MAX_ITERATIONS
-      - HUEY_DB_PATH=/app/data/huey.db
-    volumes:
-      - huey_data:/app/data
-    command: uv run huey_consumer.py agents.task_queue.huey -w 2 -k process
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    command: uv run huey_consumer.py agents.task_queue.huey -w 2 -k thread
     profiles:
       - scale
     deploy:
@@ -106,4 +115,4 @@ services:
       - manual
 
 volumes:
-  huey_data:
+  redis_data:

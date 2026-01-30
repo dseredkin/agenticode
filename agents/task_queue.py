@@ -1,4 +1,4 @@
-"""Task queue for processing GitHub events with Huey and SQLite."""
+"""Task queue for processing GitHub events with Huey and Redis."""
 
 from __future__ import annotations
 
@@ -7,10 +7,9 @@ import os
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
-from huey import SqliteHuey  # type: ignore[import-untyped]
+from huey import RedisHuey  # type: ignore[import-untyped]
 from huey.api import Result  # type: ignore[import-untyped]
 from huey.consumer import Consumer  # type: ignore[import-untyped]
 
@@ -19,11 +18,8 @@ logger = logging.getLogger(__name__)
 _consumer_thread: threading.Thread | None = None
 _consumer_started = threading.Event()
 
-# Default database path
-DEFAULT_DB_PATH = os.environ.get(
-    "HUEY_DB_PATH",
-    str(Path(__file__).parent.parent / "data" / "huey.db"),
-)
+# Default Redis URL
+DEFAULT_REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 
 class TaskType(str, Enum):
@@ -57,28 +53,25 @@ class QueueEnqueueError(QueueError):
 class QueueConfig:
     """Configuration for the task queue."""
 
-    db_path: str = field(
-        default_factory=lambda: os.environ.get("HUEY_DB_PATH", DEFAULT_DB_PATH)
+    redis_url: str = field(
+        default_factory=lambda: os.environ.get("REDIS_URL", DEFAULT_REDIS_URL)
     )
     default_timeout: int = 600  # 10 minutes
     result_ttl: int = 3600  # 1 hour
     max_retries: int = 3
 
 
-def get_huey(db_path: str | None = None) -> SqliteHuey:
+def get_huey(redis_url: str | None = None) -> RedisHuey:
     """Get or create the Huey instance.
 
     Args:
-        db_path: Path to SQLite database file.
+        redis_url: Redis connection URL.
 
     Returns:
-        SqliteHuey instance.
+        RedisHuey instance.
     """
-    path = db_path or DEFAULT_DB_PATH
-    db_dir = Path(path).parent
-    db_dir.mkdir(parents=True, exist_ok=True)
-
-    return SqliteHuey(filename=path, immediate=False)
+    url = redis_url or DEFAULT_REDIS_URL
+    return RedisHuey(url=url, immediate=False)
 
 
 # Global huey instance for task registration
@@ -348,18 +341,18 @@ class TaskQueueManager:
 
     def __init__(
         self,
-        db_path: str | None = None,
+        redis_url: str | None = None,
         config: QueueConfig | None = None,
     ) -> None:
         """Initialize task queue manager.
 
         Args:
-            db_path: Path to SQLite database.
+            redis_url: Redis connection URL.
             config: Queue configuration.
         """
         self._config = config or QueueConfig()
-        self._db_path = db_path or self._config.db_path
-        self._huey = get_huey(self._db_path)
+        self._redis_url = redis_url or self._config.redis_url
+        self._huey = get_huey(self._redis_url)
         self._processing: set[str] = set()
 
     def _get_task_id(self, task_type: TaskType, identifier: int) -> str:
@@ -608,7 +601,7 @@ class TaskQueueManager:
         """Check if queue is healthy.
 
         Returns:
-            True if SQLite database is accessible.
+            True if Redis is accessible.
         """
         try:
             self._huey.pending()

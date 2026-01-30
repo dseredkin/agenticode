@@ -1,7 +1,5 @@
-"""Tests for Task Queue with Huey/SQLite."""
+"""Tests for Task Queue with Huey/Redis."""
 
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,26 +19,26 @@ class TestQueueConfig:
 
     def test_default_config(self, monkeypatch):
         """Test default configuration values."""
-        monkeypatch.delenv("HUEY_DB_PATH", raising=False)
+        monkeypatch.delenv("REDIS_URL", raising=False)
         config = QueueConfig()
-        assert "huey.db" in config.db_path
+        assert "redis://" in config.redis_url
         assert config.default_timeout == 600
         assert config.result_ttl == 3600
         assert config.max_retries == 3
 
     def test_config_from_env(self, monkeypatch):
-        """Test configuration reads HUEY_DB_PATH from environment."""
-        monkeypatch.setenv("HUEY_DB_PATH", "/tmp/custom-huey.db")
+        """Test configuration reads REDIS_URL from environment."""
+        monkeypatch.setenv("REDIS_URL", "redis://custom:6379/1")
         config = QueueConfig()
-        assert config.db_path == "/tmp/custom-huey.db"
+        assert config.redis_url == "redis://custom:6379/1"
 
     def test_custom_config(self):
         """Test custom configuration values."""
         config = QueueConfig(
-            db_path="/custom/path/huey.db",
+            redis_url="redis://localhost:6380/2",
             default_timeout=300,
         )
-        assert config.db_path == "/custom/path/huey.db"
+        assert config.redis_url == "redis://localhost:6380/2"
         assert config.default_timeout == 300
 
 
@@ -126,15 +124,14 @@ class TestTaskQueueManager:
     """Tests for TaskQueueManager class."""
 
     @pytest.fixture
-    def temp_db(self):
-        """Create a temporary database path."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield str(Path(tmpdir) / "test_huey.db")
+    def redis_url(self):
+        """Create a test Redis URL."""
+        return "redis://localhost:6379/15"
 
     @pytest.fixture
-    def manager(self, temp_db):
-        """Create TaskQueueManager with temp database."""
-        return TaskQueueManager(db_path=temp_db)
+    def manager(self, redis_url):
+        """Create TaskQueueManager with test Redis URL."""
+        return TaskQueueManager(redis_url=redis_url)
 
     def test_get_task_id(self, manager):
         """Test task ID generation."""
@@ -209,14 +206,13 @@ class TestDeduplication:
     """Tests for task deduplication."""
 
     @pytest.fixture
-    def temp_db(self):
-        """Create a temporary database path."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield str(Path(tmpdir) / "test_huey.db")
+    def redis_url(self):
+        """Create a test Redis URL."""
+        return "redis://localhost:6379/15"
 
-    def test_deduplicate_multiple_same_issues(self, temp_db):
+    def test_deduplicate_multiple_same_issues(self, redis_url):
         """Test that same issue is not queued multiple times."""
-        manager = TaskQueueManager(db_path=temp_db)
+        manager = TaskQueueManager(redis_url=redis_url)
 
         result1 = manager.enqueue_issue_moderate(1)
         result2 = manager.enqueue_issue_moderate(1)
@@ -226,17 +222,17 @@ class TestDeduplication:
         assert result2 is None
         assert result3 is None
 
-    def test_different_issues_queued_separately(self, temp_db):
+    def test_different_issues_queued_separately(self, redis_url):
         """Test that different issues are queued separately."""
-        manager = TaskQueueManager(db_path=temp_db)
+        manager = TaskQueueManager(redis_url=redis_url)
 
         results = [manager.enqueue_issue_moderate(i) for i in range(1, 6)]
 
         assert all(result is not None for result in results)
 
-    def test_same_issue_different_task_types(self, temp_db):
+    def test_same_issue_different_task_types(self, redis_url):
         """Test same issue can be queued for different task types."""
-        manager = TaskQueueManager(db_path=temp_db)
+        manager = TaskQueueManager(redis_url=redis_url)
 
         result1 = manager.enqueue_issue_moderate(1)
         result2 = manager.enqueue_code_generation(1)
