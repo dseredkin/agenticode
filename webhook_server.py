@@ -36,7 +36,9 @@ app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1MB
 # Rate limiting configuration
 # High defaults for webhook burst traffic (3000+ simultaneous webhooks)
 RATE_LIMIT_GLOBAL = os.environ.get("RATE_LIMIT_GLOBAL", "5000/minute")
-RATE_LIMIT_PER_INSTALLATION = os.environ.get("RATE_LIMIT_PER_INSTALLATION", "1000/minute")
+RATE_LIMIT_PER_INSTALLATION = os.environ.get(
+    "RATE_LIMIT_PER_INSTALLATION", "1000/minute"
+)
 
 
 def get_installation_id_for_limit() -> str:
@@ -48,7 +50,7 @@ def get_installation_id_for_limit() -> str:
             installation_id = installation.get("id")
             if installation_id:
                 return str(installation_id)
-    except Exception:
+    except Exception:  # noqa: S110
         pass
     # Fall back to IP address
     return get_remote_address()
@@ -66,21 +68,31 @@ limiter = Limiter(
 def rate_limit_exceeded(e):
     """Handle rate limit exceeded errors."""
     logger.warning(f"Rate limit exceeded: {e.description}")
-    return jsonify({
-        "error": "Rate limit exceeded",
-        "message": str(e.description),
-        "retry_after": e.description,
-    }), 429
+    return (
+        jsonify(
+            {
+                "error": "Rate limit exceeded",
+                "message": str(e.description),
+                "retry_after": e.description,
+            }
+        ),
+        429,
+    )
 
 
 @app.errorhandler(413)
 def request_too_large(e):
     """Handle request entity too large errors."""
     logger.warning("Request payload too large")
-    return jsonify({
-        "error": "Request too large",
-        "message": "Payload exceeds 1MB limit",
-    }), 413
+    return (
+        jsonify(
+            {
+                "error": "Request too large",
+                "message": "Payload exceeds 1MB limit",
+            }
+        ),
+        413,
+    )
 
 
 # Consumer startup is handled by gunicorn.conf.py post_fork hook when using gunicorn.
@@ -146,7 +158,9 @@ def extract_installation_context(payload: dict) -> tuple[int | None, str | None]
 _contributor_installation_cache: dict[str, int] = {}
 
 
-def is_contributor_app_webhook(installation_id: int | None, repository: str | None) -> bool:
+def is_contributor_app_webhook(
+    installation_id: int | None, repository: str | None
+) -> bool:
     """Check if the webhook is from the contributor app's installation.
 
     This prevents duplicate processing when both contributor and reviewer apps
@@ -198,11 +212,13 @@ def health():
         budget = get_token_budget()
         if qm.is_healthy():
             stats = qm.get_queue_stats()
-            return jsonify({
-                "status": "ok",
-                "queue": stats,
-                "token_budget": budget.get_status(),
-            })
+            return jsonify(
+                {
+                    "status": "ok",
+                    "queue": stats,
+                    "token_budget": budget.get_status(),
+                }
+            )
         return jsonify({"status": "degraded", "error": "Queue not healthy"}), 503
     except QueueConnectionError as e:
         return jsonify({"status": "degraded", "error": str(e)}), 503

@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from huey import RedisHuey  # type: ignore[import-untyped]
-from huey.api import Result  # type: ignore[import-untyped]
-from huey.consumer import Consumer  # type: ignore[import-untyped]
+from huey import RedisHuey
+from huey.api import Result
+from huey.consumer import Consumer
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,9 @@ def start_consumer_thread(workers: int = 48) -> None:
     try:
         pending_count = len(huey.pending())
         if pending_count > 0:
-            logger.info(f"[Queue] Clearing {pending_count} pending tasks from previous run")
+            logger.info(
+                f"[Queue] Clearing {pending_count} pending tasks from previous run"
+            )
             huey.flush()
     except Exception as e:
         logger.warning(f"[Queue] Failed to clear pending tasks: {e}")

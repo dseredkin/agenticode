@@ -91,16 +91,20 @@ class TokenBudget:
 
             if self._hourly_limit is not None:
                 if self._hourly_tokens + estimated_tokens > self._hourly_limit:
+                    used, limit = self._hourly_tokens, self._hourly_limit
+                    msg = f"Hourly budget exceeded: {used}/{limit}"
                     raise BudgetExceededError(
-                        f"Hourly token budget exceeded: {self._hourly_tokens}/{self._hourly_limit}",
+                        msg,
                         tokens_used=self._hourly_tokens,
                         budget=self._hourly_limit,
                     )
 
             if self._daily_limit is not None:
                 if self._daily_tokens + estimated_tokens > self._daily_limit:
+                    used, limit = self._daily_tokens, self._daily_limit
+                    msg = f"Daily budget exceeded: {used}/{limit}"
                     raise BudgetExceededError(
-                        f"Daily token budget exceeded: {self._daily_tokens}/{self._daily_limit}",
+                        msg,
                         tokens_used=self._daily_tokens,
                         budget=self._daily_limit,
                     )
@@ -365,7 +369,7 @@ class GrokProvider(BaseLLMProvider):
         except Exception as e:
             logger.error(f"Failed to parse Grok API response: {e}")
             logger.error(f"Response text: {response.text[:500]}")
-            raise ValueError(f"Invalid JSON response from Grok API: {e}")
+            raise ValueError(f"Invalid JSON response from Grok API: {e}") from e
 
         # Validate response structure
         if "choices" not in data or not data["choices"]:
@@ -609,7 +613,9 @@ class LLMClient:
                 )
                 time.sleep(delay)
 
-        logger.error(f"All {self._max_retries} LLM retries failed. Last error: {last_error}")
+        logger.error(
+            f"All {self._max_retries} LLM retries failed. Last error: {last_error}"
+        )
         raise last_error or Exception("All retries failed")
 
     def generate_code(

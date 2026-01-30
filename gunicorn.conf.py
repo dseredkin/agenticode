@@ -37,7 +37,9 @@ def post_fork(server, worker):
 
     # Use a file lock to ensure only one worker starts the consumer
     import fcntl
-    lock_file = "/tmp/huey_consumer.lock"
+    import tempfile
+
+    lock_file = os.path.join(tempfile.gettempdir(), "huey_consumer.lock")
 
     try:
         lock_fd = open(lock_file, "w")
@@ -55,7 +57,9 @@ def post_fork(server, worker):
         worker._consumer_lock_fd = lock_fd
     except BlockingIOError:
         # Another worker has the lock - don't start consumer
-        server.log.info(f"Worker {worker.pid} skipping consumer (another worker has it)")
+        server.log.info(
+            f"Worker {worker.pid} skipping consumer (another worker has it)"
+        )
     except Exception as e:
         server.log.error(f"Failed to start consumer in worker {worker.pid}: {e}")
 
@@ -69,5 +73,5 @@ def worker_exit(server, worker):
         try:
             worker._consumer_lock_fd.close()
             server.log.info(f"Released consumer lock from worker {worker.pid}")
-        except Exception:
-            pass
+        except Exception as e:
+            server.log.warning(f"Failed to release consumer lock: {e}")
