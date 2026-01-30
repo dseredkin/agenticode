@@ -11,6 +11,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from agents.utils.github_app import get_installation_id_for_repo, load_private_key
 from agents.utils.github_client import GitHubClient
 from agents.utils.llm_client import LLMClient
 
@@ -113,13 +114,25 @@ class IssueModerator:
         """
         # Use contributor app credentials if available
         contributor_app_id = os.environ.get("GITHUB_APP_CONTRIBUTOR_ID")
-        contributor_app_key = os.environ.get("GITHUB_APP_CONTRIBUTOR_PRIVATE_KEY")
+        contributor_app_key_env = os.environ.get("GITHUB_APP_CONTRIBUTOR_PRIVATE_KEY")
+
+        # Handle private key (can be path or content)
+        contributor_app_key = None
+        if contributor_app_key_env:
+            if contributor_app_key_env.startswith("-----BEGIN"):
+                contributor_app_key = contributor_app_key_env
+            else:
+                contributor_app_key = load_private_key(contributor_app_key_env)
 
         if github_client:
             self._github = github_client
-        elif installation_id:
+        elif contributor_app_id and contributor_app_key and repository:
+            # Look up the contributor app's installation ID for this repository
+            contributor_installation_id = get_installation_id_for_repo(
+                contributor_app_id, contributor_app_key, repository
+            )
             self._github = GitHubClient(
-                installation_id=installation_id,
+                installation_id=contributor_installation_id,
                 repository=repository,
                 app_id=contributor_app_id,
                 app_private_key=contributor_app_key,

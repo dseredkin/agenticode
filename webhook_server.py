@@ -15,6 +15,7 @@ from agents.task_queue import (
     TaskQueueManager,
     start_consumer_thread,
 )
+from agents.utils.github_app import get_installation_id_for_repo, load_private_key
 
 load_dotenv()
 
@@ -81,6 +82,54 @@ def extract_installation_context(payload: dict) -> tuple[int | None, str | None]
     repo_full_name = repository.get("full_name")
 
     return installation_id, repo_full_name
+
+
+# Cache for contributor installation IDs per repository
+_contributor_installation_cache: dict[str, int] = {}
+
+
+def is_contributor_app_webhook(installation_id: int | None, repository: str | None) -> bool:
+    """Check if the webhook is from the contributor app's installation.
+
+    This prevents duplicate processing when both contributor and reviewer apps
+    are installed on the same repository.
+
+    Args:
+        installation_id: Installation ID from webhook payload.
+        repository: Repository in owner/repo format.
+
+    Returns:
+        True if this is the contributor app's installation, False otherwise.
+    """
+    if not installation_id or not repository:
+        return True  # Allow processing if we can't verify
+
+    # Check cache first
+    if repository in _contributor_installation_cache:
+        return _contributor_installation_cache[repository] == installation_id
+
+    # Look up the contributor app's installation ID
+    contributor_app_id = os.environ.get("GITHUB_APP_CONTRIBUTOR_ID")
+    contributor_app_key_env = os.environ.get("GITHUB_APP_CONTRIBUTOR_PRIVATE_KEY")
+
+    if not contributor_app_id or not contributor_app_key_env:
+        return True  # Allow processing if credentials not configured
+
+    try:
+        if contributor_app_key_env.startswith("-----BEGIN"):
+            contributor_app_key = contributor_app_key_env
+        else:
+            contributor_app_key = load_private_key(contributor_app_key_env)
+
+        contributor_installation_id = get_installation_id_for_repo(
+            contributor_app_id, contributor_app_key, repository
+        )
+        _contributor_installation_cache[repository] = contributor_installation_id
+
+        return contributor_installation_id == installation_id
+    except Exception as e:
+        logger.warning(f"Failed to verify contributor installation: {e}")
+        return True  # Allow processing on error
 
 
 @app.route("/health", methods=["GET"])
@@ -257,6 +306,11 @@ def handle_pr_event(payload: dict, delivery_id: str):
         f"(installation={installation_id}, repo={repository})"
     )
 
+    # Only process webhooks from the contributor app to avoid duplicates
+    if not is_contributor_app_webhook(installation_id, repository):
+        logger.info(f"[{delivery_id}] Ignoring PR webhook from non-contributor app")
+        return jsonify({"status": "ignored", "reason": "not contributor app"})
+
     if action not in ["opened", "synchronize"]:
         return jsonify({"status": "ignored", "reason": f"action={action}"})
 
@@ -312,6 +366,11 @@ def handle_pr_review_event(payload: dict, delivery_id: str):
         f"[{delivery_id}] PR #{pr_number} review by {reviewer}: {review_state} "
         f"(installation={installation_id}, repo={repository})"
     )
+
+    # Only process webhooks from the contributor app to avoid duplicates
+    if not is_contributor_app_webhook(installation_id, repository):
+        logger.info(f"[{delivery_id}] Ignoring review webhook from non-contributor app")
+        return jsonify({"status": "ignored", "reason": "not contributor app"})
 
     if action != "submitted":
         return jsonify({"status": "ignored", "reason": f"action={action}"})
