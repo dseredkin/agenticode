@@ -311,22 +311,61 @@ class CodeAgent:
             List of GeneratedFile objects.
         """
         files: list[GeneratedFile] = []
-        code_block_pattern = r"```(?:python|py)?\n(.*?)```"
-        blocks = re.findall(code_block_pattern, response, re.DOTALL)
+        # Match any language identifier (or none) in code blocks
+        code_block_pattern = r"```(\w*)\n(.*?)```"
+        matches = re.findall(code_block_pattern, response, re.DOTALL)
 
-        for block in blocks:
+        # Map language identifiers to file extensions
+        lang_to_ext = {
+            "python": ".py",
+            "py": ".py",
+            "kotlin": ".kt",
+            "java": ".java",
+            "javascript": ".js",
+            "js": ".js",
+            "typescript": ".ts",
+            "ts": ".ts",
+            "go": ".go",
+            "rust": ".rs",
+            "ruby": ".rb",
+            "cpp": ".cpp",
+            "c": ".c",
+            "csharp": ".cs",
+            "cs": ".cs",
+            "swift": ".swift",
+            "scala": ".scala",
+            "php": ".php",
+            "html": ".html",
+            "css": ".css",
+            "json": ".json",
+            "yaml": ".yaml",
+            "yml": ".yml",
+            "xml": ".xml",
+            "sql": ".sql",
+            "sh": ".sh",
+            "bash": ".sh",
+            "": ".txt",
+        }
+
+        for lang, block in matches:
             lines = block.strip().split("\n")
             if not lines:
                 continue
 
             first_line = lines[0].strip()
-            if first_line.startswith("#") and (
-                "/" in first_line or first_line.endswith(".py")
-            ):
-                path = first_line.lstrip("#").strip()
+            # Check if first line is a file path comment (# path or // path)
+            path_match = re.match(r"^(?:#|//)\s*(.+\.\w+)$", first_line)
+            if path_match:
+                path = path_match.group(1).strip()
+                content = "\n".join(lines[1:])
+            elif "/" in first_line and "." in first_line.split("/")[-1]:
+                # First line looks like a path without comment prefix
+                path = first_line
                 content = "\n".join(lines[1:])
             else:
-                path = f"src/generated_{len(files)}.py"
+                # Generate a default path based on language
+                ext = lang_to_ext.get(lang.lower(), ".txt")
+                path = f"src/generated_{len(files)}{ext}"
                 content = block.strip()
 
             if content.strip():
