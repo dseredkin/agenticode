@@ -105,12 +105,17 @@ def start_consumer_thread(workers: int = 48) -> None:
         logger.warning(f"[Queue] Failed to clear pending tasks: {e}")
 
     def run_consumer() -> None:
+        import signal
+
+        # Disable signal handling in thread (signals only work in main thread)
+        original_signal = signal.signal
+        signal.signal = lambda *args, **kwargs: None  # type: ignore[assignment]
+
         try:
             consumer = Consumer(
                 huey,
                 workers=workers,
                 worker_type="thread",
-                setup_signals=False,
             )
             _consumer_started.set()
             logger.info(f"[Queue] Starting embedded consumer with {workers} workers")
@@ -118,6 +123,8 @@ def start_consumer_thread(workers: int = 48) -> None:
         except Exception as e:
             logger.error(f"[Queue] Consumer error: {e}")
             _consumer_started.clear()
+        finally:
+            signal.signal = original_signal  # type: ignore[assignment]
 
     _consumer_thread = threading.Thread(target=run_consumer, daemon=True)
     _consumer_thread.start()
