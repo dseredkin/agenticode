@@ -213,7 +213,9 @@ def format_code_generation_prompt(
     """
     structure_str = "\n".join(f"- {f}" for f in repo_structure[:repo_structure_limit])
     if len(repo_structure) > repo_structure_limit:
-        structure_str += f"\n... and {len(repo_structure) - repo_structure_limit} more files"
+        structure_str += (
+            f"\n... and {len(repo_structure) - repo_structure_limit} more files"
+        )
 
     code_context = ""
     if existing_code:

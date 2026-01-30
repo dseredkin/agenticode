@@ -120,15 +120,9 @@ class CodeAgent:
         self._iteration_timeout = iteration_timeout or int(
             os.environ.get("ITERATION_TIMEOUT", "600")
         )
-        self._repo_structure_limit = int(
-            os.environ.get("REPO_STRUCTURE_LIMIT", "100")
-        )
-        self._files_to_check_limit = int(
-            os.environ.get("FILES_TO_CHECK_LIMIT", "30")
-        )
-        self._relevant_files_limit = int(
-            os.environ.get("RELEVANT_FILES_LIMIT", "10")
-        )
+        self._repo_structure_limit = int(os.environ.get("REPO_STRUCTURE_LIMIT", "100"))
+        self._files_to_check_limit = int(os.environ.get("FILES_TO_CHECK_LIMIT", "30"))
+        self._relevant_files_limit = int(os.environ.get("RELEVANT_FILES_LIMIT", "10"))
 
     def run(self, issue_number: int) -> GenerationResult:
         """Run code generation for an issue.
