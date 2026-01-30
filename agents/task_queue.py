@@ -1,17 +1,24 @@
-"""Task queue for processing GitHub events with Redis and RQ."""
+"""Task queue for processing GitHub events with Huey and SQLite."""
+
+from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
-from redis import Redis
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import RedisError
-from rq import Queue
-from rq.job import Job
+from huey import SqliteHuey
+from huey.api import Result
 
 logger = logging.getLogger(__name__)
+
+# Default database path
+DEFAULT_DB_PATH = os.environ.get(
+    "HUEY_DB_PATH",
+    str(Path(__file__).parent.parent / "data" / "huey.db"),
+)
 
 
 class TaskType(str, Enum):
@@ -30,7 +37,7 @@ class QueueError(Exception):
 
 
 class QueueConnectionError(QueueError):
-    """Raised when Redis connection fails."""
+    """Raised when queue connection fails."""
 
     pass
 
@@ -45,48 +52,35 @@ class QueueEnqueueError(QueueError):
 class QueueConfig:
     """Configuration for the task queue."""
 
-    redis_url: str = field(
-        default_factory=lambda: os.environ.get("REDIS_URL", "redis://localhost:6379")
+    db_path: str = field(
+        default_factory=lambda: os.environ.get("HUEY_DB_PATH", DEFAULT_DB_PATH)
     )
     default_timeout: int = 600  # 10 minutes
     result_ttl: int = 3600  # 1 hour
-    failure_ttl: int = 86400  # 24 hours
     max_retries: int = 3
-    connection_timeout: int = 5  # seconds
 
 
-def get_redis_connection(url: str | None = None, timeout: int = 5) -> Redis:
-    """Get Redis connection from URL or environment.
+def get_huey(db_path: str | None = None) -> SqliteHuey:
+    """Get or create the Huey instance.
 
     Args:
-        url: Redis URL.
-        timeout: Connection timeout in seconds.
+        db_path: Path to SQLite database file.
 
     Returns:
-        Redis connection.
-
-    Raises:
-        QueueConnectionError: If connection fails.
+        SqliteHuey instance.
     """
-    redis_url = url or os.environ.get("REDIS_URL", "redis://localhost:6379")
-    try:
-        conn = Redis.from_url(redis_url, socket_timeout=timeout)
-        conn.ping()  # Test connection
-        return conn
-    except RedisConnectionError as e:
-        logger.error(f"Failed to connect to Redis at {redis_url}: {e}")
-        raise QueueConnectionError(f"Redis connection failed: {e}") from e
-    except RedisError as e:
-        logger.error(f"Redis error: {e}")
-        raise QueueConnectionError(f"Redis error: {e}") from e
+    path = db_path or DEFAULT_DB_PATH
+    db_dir = Path(path).parent
+    db_dir.mkdir(parents=True, exist_ok=True)
+
+    return SqliteHuey(filename=path, immediate=False)
 
 
-def get_queue(name: str = "default", redis_conn: Redis | None = None) -> Queue:
-    """Get or create a queue."""
-    conn = redis_conn or get_redis_connection()
-    return Queue(name, connection=conn)
+# Global huey instance for task registration
+huey = get_huey()
 
 
+@huey.task(retries=3, retry_delay=60)
 def run_issue_moderator(issue_number: int) -> dict:
     """Task: Run issue moderator on an issue.
 
@@ -126,6 +120,7 @@ def run_issue_moderator(issue_number: int) -> dict:
         }
 
 
+@huey.task(retries=3, retry_delay=60)
 def run_code_agent_issue(issue_number: int) -> dict:
     """Task: Run code agent to generate code from an issue.
 
@@ -163,6 +158,7 @@ def run_code_agent_issue(issue_number: int) -> dict:
         }
 
 
+@huey.task(retries=3, retry_delay=60)
 def run_code_agent_pr(pr_number: int) -> dict:
     """Task: Run code agent to iterate on PR feedback.
 
@@ -196,6 +192,7 @@ def run_code_agent_pr(pr_number: int) -> dict:
         }
 
 
+@huey.task(retries=3, retry_delay=60)
 def run_reviewer_agent(pr_number: int) -> dict:
     """Task: Run reviewer agent on a PR.
 
@@ -234,97 +231,52 @@ class TaskQueueManager:
 
     def __init__(
         self,
-        redis_url: str | None = None,
+        db_path: str | None = None,
         config: QueueConfig | None = None,
     ) -> None:
         """Initialize task queue manager.
 
         Args:
-            redis_url: Redis connection URL.
+            db_path: Path to SQLite database.
             config: Queue configuration.
-
-        Raises:
-            QueueConnectionError: If Redis connection fails.
         """
         self._config = config or QueueConfig()
-        self._redis_url = redis_url or self._config.redis_url
-        self._redis: Redis | None = None
-        self._queue: Queue | None = None
-        self._processing_key = "agenticode:processing"
+        self._db_path = db_path or self._config.db_path
+        self._huey = get_huey(self._db_path)
+        self._processing: set[str] = set()
 
-    def _ensure_connection(self) -> None:
-        """Ensure Redis connection is established.
-
-        Raises:
-            QueueConnectionError: If connection fails.
-        """
-        if self._redis is None:
-            self._redis = get_redis_connection(
-                self._redis_url,
-                self._config.connection_timeout,
-            )
-            self._queue = Queue("agents", connection=self._redis)
-
-    def _get_redis(self) -> Redis:
-        """Get Redis connection, reconnecting if needed."""
-        self._ensure_connection()
-        try:
-            self._redis.ping()
-        except (RedisError, AttributeError):
-            self._redis = None
-            self._queue = None
-            self._ensure_connection()
-        return self._redis
-
-    def _get_queue(self) -> Queue:
-        """Get queue, reconnecting if needed."""
-        self._get_redis()
-        return self._queue
-
-    def _get_job_id(self, task_type: TaskType, identifier: int) -> str:
-        """Generate unique job ID for deduplication."""
+    def _get_task_id(self, task_type: TaskType, identifier: int) -> str:
+        """Generate unique task ID for deduplication."""
         return f"{task_type.value}:{identifier}"
 
-    def _is_processing(self, job_id: str) -> bool:
-        """Check if a job is already processing or queued."""
-        redis = self._get_redis()
-
-        if redis.sismember(self._processing_key, job_id):
+    def _is_processing(self, task_id: str) -> bool:
+        """Check if a task is already processing or queued."""
+        if task_id in self._processing:
             return True
 
         try:
-            job = Job.fetch(job_id, connection=redis)
-            if job and job.get_status() in ["queued", "started", "deferred"]:
-                return True
+            pending = self._huey.pending()
+            for task in pending:
+                if task.id == task_id:
+                    return True
         except Exception:
             pass
 
         return False
 
-    def _mark_processing(self, job_id: str, ttl: int = 7200) -> None:
-        """Mark a job as processing with TTL.
+    def _mark_processing(self, task_id: str) -> None:
+        """Mark a task as processing."""
+        self._processing.add(task_id)
 
-        Args:
-            job_id: Job identifier.
-            ttl: Time-to-live in seconds (default 2 hours).
-        """
-        redis = self._get_redis()
-        redis.sadd(self._processing_key, job_id)
-        redis.expire(self._processing_key, ttl)
-
-    def _unmark_processing(self, job_id: str) -> None:
-        """Remove job from processing set."""
-        try:
-            redis = self._get_redis()
-            redis.srem(self._processing_key, job_id)
-        except Exception as e:
-            logger.warning(f"Failed to unmark processing for {job_id}: {e}")
+    def _unmark_processing(self, task_id: str) -> None:
+        """Remove task from processing set."""
+        self._processing.discard(task_id)
 
     def enqueue_issue_moderate(
         self,
         issue_number: int,
         deduplicate: bool = True,
-    ) -> Job | None:
+    ) -> Result[Any] | None:
         """Enqueue issue moderation task.
 
         Args:
@@ -332,43 +284,25 @@ class TaskQueueManager:
             deduplicate: Skip if already queued/processing.
 
         Returns:
-            Job instance or None if deduplicated.
+            Result instance or None if deduplicated.
 
         Raises:
             QueueEnqueueError: If enqueueing fails.
         """
-        job_id = self._get_job_id(TaskType.ISSUE_MODERATE, issue_number)
+        task_id = self._get_task_id(TaskType.ISSUE_MODERATE, issue_number)
 
-        if deduplicate:
-            try:
-                if self._is_processing(job_id):
-                    logger.info(f"[Queue] Issue #{issue_number} already processing")
-                    return None
-            except QueueConnectionError:
-                raise
-            except Exception as e:
-                logger.warning(f"Deduplication check failed: {e}")
+        if deduplicate and self._is_processing(task_id):
+            logger.info(f"[Queue] Issue #{issue_number} already processing")
+            return None
 
         try:
-            self._mark_processing(job_id)
-            queue = self._get_queue()
-
-            job = queue.enqueue(
-                run_issue_moderator,
-                issue_number,
-                job_id=job_id,
-                job_timeout=self._config.default_timeout,
-                result_ttl=self._config.result_ttl,
-                failure_ttl=self._config.failure_ttl,
-                on_success=lambda *args: self._unmark_processing(job_id),
-                on_failure=lambda *args: self._unmark_processing(job_id),
-            )
-
+            self._mark_processing(task_id)
+            result = run_issue_moderator(issue_number)
             logger.info(f"[Queue] Enqueued issue moderation for #{issue_number}")
-            return job
+            return result
 
-        except RedisError as e:
-            self._unmark_processing(job_id)
+        except Exception as e:
+            self._unmark_processing(task_id)
             logger.error(f"Failed to enqueue issue moderation: {e}")
             raise QueueEnqueueError(f"Failed to enqueue: {e}") from e
 
@@ -376,7 +310,7 @@ class TaskQueueManager:
         self,
         issue_number: int,
         deduplicate: bool = True,
-    ) -> Job | None:
+    ) -> Result[Any] | None:
         """Enqueue code generation task.
 
         Args:
@@ -384,43 +318,25 @@ class TaskQueueManager:
             deduplicate: Skip if already queued/processing.
 
         Returns:
-            Job instance or None if deduplicated.
+            Result instance or None if deduplicated.
 
         Raises:
             QueueEnqueueError: If enqueueing fails.
         """
-        job_id = self._get_job_id(TaskType.ISSUE_GENERATE, issue_number)
+        task_id = self._get_task_id(TaskType.ISSUE_GENERATE, issue_number)
 
-        if deduplicate:
-            try:
-                if self._is_processing(job_id):
-                    logger.info(f"[Queue] Code gen #{issue_number} already processing")
-                    return None
-            except QueueConnectionError:
-                raise
-            except Exception as e:
-                logger.warning(f"Deduplication check failed: {e}")
+        if deduplicate and self._is_processing(task_id):
+            logger.info(f"[Queue] Code gen #{issue_number} already processing")
+            return None
 
         try:
-            self._mark_processing(job_id)
-            queue = self._get_queue()
-
-            job = queue.enqueue(
-                run_code_agent_issue,
-                issue_number,
-                job_id=job_id,
-                job_timeout=self._config.default_timeout,
-                result_ttl=self._config.result_ttl,
-                failure_ttl=self._config.failure_ttl,
-                on_success=lambda *args: self._unmark_processing(job_id),
-                on_failure=lambda *args: self._unmark_processing(job_id),
-            )
-
+            self._mark_processing(task_id)
+            result = run_code_agent_issue(issue_number)
             logger.info(f"[Queue] Enqueued code generation for issue #{issue_number}")
-            return job
+            return result
 
-        except RedisError as e:
-            self._unmark_processing(job_id)
+        except Exception as e:
+            self._unmark_processing(task_id)
             logger.error(f"Failed to enqueue code generation: {e}")
             raise QueueEnqueueError(f"Failed to enqueue: {e}") from e
 
@@ -428,7 +344,7 @@ class TaskQueueManager:
         self,
         pr_number: int,
         deduplicate: bool = True,
-    ) -> Job | None:
+    ) -> Result[Any] | None:
         """Enqueue PR review task.
 
         Args:
@@ -436,43 +352,25 @@ class TaskQueueManager:
             deduplicate: Skip if already queued/processing.
 
         Returns:
-            Job instance or None if deduplicated.
+            Result instance or None if deduplicated.
 
         Raises:
             QueueEnqueueError: If enqueueing fails.
         """
-        job_id = self._get_job_id(TaskType.PR_REVIEW, pr_number)
+        task_id = self._get_task_id(TaskType.PR_REVIEW, pr_number)
 
-        if deduplicate:
-            try:
-                if self._is_processing(job_id):
-                    logger.info(f"[Queue] PR #{pr_number} review already processing")
-                    return None
-            except QueueConnectionError:
-                raise
-            except Exception as e:
-                logger.warning(f"Deduplication check failed: {e}")
+        if deduplicate and self._is_processing(task_id):
+            logger.info(f"[Queue] PR #{pr_number} review already processing")
+            return None
 
         try:
-            self._mark_processing(job_id)
-            queue = self._get_queue()
-
-            job = queue.enqueue(
-                run_reviewer_agent,
-                pr_number,
-                job_id=job_id,
-                job_timeout=self._config.default_timeout,
-                result_ttl=self._config.result_ttl,
-                failure_ttl=self._config.failure_ttl,
-                on_success=lambda *args: self._unmark_processing(job_id),
-                on_failure=lambda *args: self._unmark_processing(job_id),
-            )
-
+            self._mark_processing(task_id)
+            result = run_reviewer_agent(pr_number)
             logger.info(f"[Queue] Enqueued PR review for #{pr_number}")
-            return job
+            return result
 
-        except RedisError as e:
-            self._unmark_processing(job_id)
+        except Exception as e:
+            self._unmark_processing(task_id)
             logger.error(f"Failed to enqueue PR review: {e}")
             raise QueueEnqueueError(f"Failed to enqueue: {e}") from e
 
@@ -480,7 +378,7 @@ class TaskQueueManager:
         self,
         pr_number: int,
         deduplicate: bool = True,
-    ) -> Job | None:
+    ) -> Result[Any] | None:
         """Enqueue PR iteration task.
 
         Args:
@@ -488,66 +386,56 @@ class TaskQueueManager:
             deduplicate: Skip if already queued/processing.
 
         Returns:
-            Job instance or None if deduplicated.
+            Result instance or None if deduplicated.
 
         Raises:
             QueueEnqueueError: If enqueueing fails.
         """
-        job_id = self._get_job_id(TaskType.PR_ITERATE, pr_number)
+        task_id = self._get_task_id(TaskType.PR_ITERATE, pr_number)
 
-        if deduplicate:
-            try:
-                if self._is_processing(job_id):
-                    logger.info(f"[Queue] PR #{pr_number} iteration already processing")
-                    return None
-            except QueueConnectionError:
-                raise
-            except Exception as e:
-                logger.warning(f"Deduplication check failed: {e}")
+        if deduplicate and self._is_processing(task_id):
+            logger.info(f"[Queue] PR #{pr_number} iteration already processing")
+            return None
 
         try:
-            self._mark_processing(job_id)
-            queue = self._get_queue()
-
-            job = queue.enqueue(
-                run_code_agent_pr,
-                pr_number,
-                job_id=job_id,
-                job_timeout=self._config.default_timeout,
-                result_ttl=self._config.result_ttl,
-                failure_ttl=self._config.failure_ttl,
-                on_success=lambda *args: self._unmark_processing(job_id),
-                on_failure=lambda *args: self._unmark_processing(job_id),
-            )
-
+            self._mark_processing(task_id)
+            result = run_code_agent_pr(pr_number)
             logger.info(f"[Queue] Enqueued PR iteration for #{pr_number}")
-            return job
+            return result
 
-        except RedisError as e:
-            self._unmark_processing(job_id)
+        except Exception as e:
+            self._unmark_processing(task_id)
             logger.error(f"Failed to enqueue PR iteration: {e}")
             raise QueueEnqueueError(f"Failed to enqueue: {e}") from e
 
-    def get_job_status(self, job_id: str) -> dict | None:
-        """Get status of a job.
+    def get_job_status(self, task_id: str) -> dict | None:
+        """Get status of a task.
 
         Args:
-            job_id: The job ID.
+            task_id: The task ID.
 
         Returns:
             Status dictionary or None if not found.
         """
         try:
-            redis = self._get_redis()
-            job = Job.fetch(job_id, connection=redis)
-            return {
-                "id": job.id,
-                "status": job.get_status(),
-                "result": job.result,
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "started_at": job.started_at.isoformat() if job.started_at else None,
-                "ended_at": job.ended_at.isoformat() if job.ended_at else None,
-            }
+            result = self._huey.result(task_id, preserve=True)
+            if result is not None:
+                return {
+                    "id": task_id,
+                    "status": "completed",
+                    "result": result,
+                }
+
+            pending = self._huey.pending()
+            for task in pending:
+                if task.id == task_id:
+                    return {
+                        "id": task_id,
+                        "status": "queued",
+                        "result": None,
+                    }
+
+            return None
         except Exception:
             return None
 
@@ -556,32 +444,25 @@ class TaskQueueManager:
 
         Returns:
             Dictionary with queue stats.
-
-        Raises:
-            QueueConnectionError: If Redis connection fails.
         """
         try:
-            queue = self._get_queue()
+            pending = self._huey.pending()
             return {
-                "queued": len(queue),
-                "started": queue.started_job_registry.count,
-                "finished": queue.finished_job_registry.count,
-                "failed": queue.failed_job_registry.count,
-                "deferred": queue.deferred_job_registry.count,
+                "queued": len(list(pending)),
+                "processing": len(self._processing),
             }
-        except RedisError as e:
+        except Exception as e:
             logger.error(f"Failed to get queue stats: {e}")
-            raise QueueConnectionError(f"Failed to get stats: {e}") from e
+            return {"queued": 0, "processing": 0}
 
     def is_healthy(self) -> bool:
         """Check if queue is healthy.
 
         Returns:
-            True if Redis is reachable.
+            True if SQLite database is accessible.
         """
         try:
-            redis = self._get_redis()
-            redis.ping()
+            self._huey.pending()
             return True
         except Exception:
             return False

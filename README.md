@@ -122,8 +122,8 @@ Endpoints:
 ### Docker
 
 ```bash
-# Run webhook server
-docker-compose up webhook-server
+# Run webhook server with worker
+docker-compose up webhook-server worker
 
 # Run orchestrator for an issue
 ISSUE_NUMBER=123 docker-compose run orchestrator
@@ -132,6 +132,8 @@ ISSUE_NUMBER=123 docker-compose run orchestrator
 ISSUE_NUMBER=123 docker-compose run code-agent
 PR_NUMBER=456 docker-compose run reviewer-agent
 ```
+
+The task queue uses SQLite (via Huey), so no external Redis service is required.
 
 ## Deployment
 
@@ -143,13 +145,18 @@ PR_NUMBER=456 docker-compose run reviewer-agent
    - Click **Create App** -> Select your GitHub repo
    - It will auto-detect the Dockerfile
 
-3. Add environment variables in **Settings**:
+3. Add a **Worker** component for background task processing:
+   - Click **Create Resource** -> **Worker**
+   - Set command: `uv run huey_consumer.py agents.task_queue.huey -w 2 -k process`
+
+4. Add environment variables in **Settings**:
    - `GITHUB_TOKEN` (secret)
    - `GITHUB_REPOSITORY` (e.g., `yourname/yourrepo`)
    - `OPENAI_API_KEY` (secret)
    - `WEBHOOK_SECRET` (secret, optional)
+   - `HUEY_DB_PATH` (e.g., `/app/data/huey.db`)
 
-4. Configure GitHub webhook:
+5. Configure GitHub webhook:
    - Go to your repo -> **Settings** -> **Webhooks** -> **Add webhook**
    - **Payload URL**: `https://your-app-url.ondigitalocean.app/webhook`
    - **Content type**: `application/json`
@@ -230,7 +237,9 @@ agenticode/
 ├── agents/
 │   ├── code_agent.py           # Code generation from issues
 │   ├── reviewer_agent.py       # PR review automation
+│   ├── issue_moderator.py      # Issue classification
 │   ├── interaction_orchestrator.py  # Full review-fix loop
+│   ├── task_queue.py           # Huey/SQLite task queue
 │   └── utils/
 │       ├── github_client.py    # GitHub API wrapper
 │       ├── github_app.py       # GitHub App integration
@@ -238,6 +247,7 @@ agenticode/
 │       ├── code_formatter.py   # Black, Ruff, Mypy integration
 │       └── prompts.py          # LLM prompt templates
 ├── webhook_server.py           # Flask webhook server
+├── data/                       # SQLite database (task queue)
 ├── .github/workflows/          # GitHub Actions
 ├── .do/app.yaml               # DigitalOcean App Platform config
 ├── Dockerfile                  # Container image

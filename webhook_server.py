@@ -1,4 +1,4 @@
-"""Webhook server for GitHub events with Redis queue."""
+"""Webhook server for GitHub events with SQLite queue."""
 
 import hashlib
 import hmac
@@ -67,7 +67,7 @@ def health():
         if qm.is_healthy():
             stats = qm.get_queue_stats()
             return jsonify({"status": "ok", "queue": stats})
-        return jsonify({"status": "degraded", "error": "Redis not reachable"}), 503
+        return jsonify({"status": "degraded", "error": "Queue not healthy"}), 503
     except QueueConnectionError as e:
         return jsonify({"status": "degraded", "error": str(e)}), 503
     except Exception as e:
@@ -392,7 +392,7 @@ def trigger_pr_iteration(pr_number: int):
 if __name__ == "__main__":
     port = int(os.environ.get("WEBHOOK_PORT", "8000"))
     logger.info(f"Starting webhook server on port {port}")
-    logger.info("Event-driven flow with Redis queue:")
+    logger.info("Event-driven flow with SQLite queue:")
     logger.info("  Issue (opened) -> Queue -> Issue Moderator classifies & responds")
     logger.info("  Issue (auto-generate) -> Queue -> Code Agent creates PR")
     logger.info("  PR (opened/sync) -> Queue -> Reviewer Agent reviews")
