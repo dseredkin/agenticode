@@ -184,7 +184,6 @@ Respond with JSON only."""
         response = self._llm.generate_code(
             prompt=prompt,
             system_prompt=ISSUE_CLASSIFICATION_SYSTEM_PROMPT,
-            temperature=0.3,
         )
 
         classification = self._parse_classification(response)
