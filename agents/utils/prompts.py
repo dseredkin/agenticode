@@ -136,8 +136,9 @@ IMPORTANT:
 - Use "line_comments" to provide specific feedback on exact lines in the code
 - The "line" number should match the line in the NEW version of the file (from the diff, lines starting with +)
 - Only add line_comments for actionable issues that need attention
-- If CI is failing, status must be REQUEST_CHANGES
-- If there are no issues AND CI is passing, status should be APPROVE
+- If CI is failing, status MUST be REQUEST_CHANGES
+- If there are ANY issues found (bugs, missing tests, code quality problems, etc.), status MUST be REQUEST_CHANGES
+- Only use APPROVE when CI passes AND no issues are found
 - Keep the summary concise with clear recommendations for improvement
 """
 
@@ -166,15 +167,17 @@ Review this pull request and determine if it should be approved or if changes ar
 
 IMPORTANT RULES:
 1. If CI status is "failure" or "pending", you MUST use status "REQUEST_CHANGES"
-2. If CI status is "success" AND there are no critical issues, use status "APPROVE"
-3. For each specific issue, add a line_comment with the exact file path and line number
-4. Line numbers in line_comments should reference the NEW file (lines with + in diff)
+2. If you find ANY issues (bugs, missing tests, code quality problems, security issues, etc.), you MUST use status "REQUEST_CHANGES"
+3. Only use status "APPROVE" when CI passes AND you found NO issues
+4. For each specific issue, add a line_comment with the exact file path and line number
+5. Line numbers in line_comments should reference the NEW file (lines with + in diff)
 
 Consider:
 1. Does the code fulfill the requirements from the original issue?
 2. Are there any bugs, security issues, or code quality problems?
 3. Are the CI checks passing? (This is CRITICAL - failing CI = REQUEST_CHANGES)
 4. Is the code properly tested?
+5. If you list issues in the "issues" array, status MUST be "REQUEST_CHANGES"
 
 Provide your review as a JSON object:
 """
