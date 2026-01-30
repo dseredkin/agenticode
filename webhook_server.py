@@ -206,7 +206,12 @@ def is_contributor_app_webhook(
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check endpoint."""
+    """Health check endpoint.
+
+    Always returns 200 if the server is running, even if Redis is unavailable.
+    This prevents load balancers from marking the service as down.
+    Check the 'status' field in the response for actual health state.
+    """
     try:
         qm = get_queue_manager()
         budget = get_token_budget()
@@ -219,9 +224,9 @@ def health():
                     "token_budget": budget.get_status(),
                 }
             )
-        return jsonify({"status": "degraded", "error": "Queue not healthy"}), 503
+        return jsonify({"status": "degraded", "error": "Queue not healthy"})
     except QueueConnectionError as e:
-        return jsonify({"status": "degraded", "error": str(e)}), 503
+        return jsonify({"status": "degraded", "error": str(e)})
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
