@@ -2,7 +2,8 @@ name: agenticode
 region: nyc
 services:
   - name: webhook-server
-    dockerfile_path: Dockerfile
+    dockerfile_path: /Dockerfile
+    source_dir: /
     github:
       branch: main
       deploy_on_push: true
