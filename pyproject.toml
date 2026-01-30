@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.0.0",
     "flask>=3.0.0",
+    "locust>=2.20.0",
 ]
 
 [build-system]
@@ -47,6 +48,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.0.0",
     "flask>=3.0.0",
+    "locust>=2.20.0",
 ]
 
 [tool.black]
@@ -73,7 +75,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S108", "E501"]
+"tests/*" = ["S101", "S108", "E501", "S311"]
 "webhook_server.py" = ["S104", "S603"]
 "agents/issue_moderator.py" = ["E501"]  # Long lines in template strings
 "agents/task_queue.py" = ["S110"]  # Intentional try-except-pass for job existence checks
