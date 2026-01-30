@@ -2,6 +2,12 @@
 
 GitHub-Native SDLC Automation System - automates the software development lifecycle within GitHub.
 
+## Results
+
+**Approval Rate: 70% (7/10)**
+
+Validated on [dseredkin/Python](https://github.com/dseredkin/Python/pulls) repository with 10 test issues. The system autonomously created PRs and achieved 7 approvals without manual intervention.
+
 ## GitHub Apps
 
 AgentiCode uses two separate GitHub Apps to maintain role isolation between the Code Agent and Reviewer Agent:
