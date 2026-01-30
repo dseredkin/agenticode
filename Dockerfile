@@ -13,7 +13,7 @@ ENV UV_SYSTEM_PYTHON=1
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --no-dev
 
 COPY . .
