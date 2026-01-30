@@ -30,7 +30,8 @@ app = Flask(__name__)
 # Start embedded task consumer (no separate worker needed)
 _embed_worker = os.environ.get("ENABLE_EMBEDDED_WORKER", "true").lower()
 if _embed_worker == "true":
-    start_consumer_thread(workers=2)
+    _num_workers = int(os.environ.get("QUEUE_WORKERS", "4"))
+    start_consumer_thread(workers=_num_workers)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "5"))

@@ -85,7 +85,7 @@ def get_huey(db_path: str | None = None) -> SqliteHuey:
 huey = get_huey()
 
 
-def start_consumer_thread(workers: int = 2) -> None:
+def start_consumer_thread(workers: int = 4) -> None:
     """Start Huey consumer in a background thread.
 
     This allows running the task queue without a separate worker process.
