@@ -258,7 +258,7 @@ def run_reviewer_agent(pr_number: int) -> dict:
             "success": result.success,
             "pr_number": pr_number,
             "error": result.error,
-            "decision": result.decision.value if result.decision else None,
+            "decision": result.decision.status if result.decision else None,
         }
     except Exception as e:
         logger.error(f"[Queue] Reviewer agent failed for PR #{pr_number}: {e}")
