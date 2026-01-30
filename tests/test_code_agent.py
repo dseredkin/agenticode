@@ -7,7 +7,6 @@ import pytest
 from agents.code_agent import (
     CodeAgent,
     GeneratedFile,
-    GenerationResult,
     IterationResult,
 )
 from agents.utils.github_client import IssueDetails

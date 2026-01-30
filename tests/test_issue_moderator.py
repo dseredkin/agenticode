@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from agents.issue_moderator import (
+    RESPONSE_TEMPLATES,
     ClassificationResult,
     IssueModerator,
     ModerationResult,
-    RESPONSE_TEMPLATES,
 )
 from agents.utils.github_client import IssueDetails
 

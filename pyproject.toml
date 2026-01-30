@@ -70,10 +70,14 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S108"]
+"tests/*" = ["S101", "S108", "E501"]
 "webhook_server.py" = ["S104", "S603"]
 "agents/issue_moderator.py" = ["E501"]  # Long lines in template strings
 "agents/task_queue.py" = ["S110"]  # Intentional try-except-pass for job existence checks
+"agents/utils/code_formatter.py" = ["S603", "S607"]  # Subprocess calls to known tools
+"agents/utils/prompts.py" = ["E501"]  # Long prompt strings
+"agents/utils/installation_store.py" = ["E501"]  # Long SQL strings
+"agents/utils/github_client.py" = ["E501"]  # Long docstrings
 
 [tool.mypy]
 python_version = "3.11"

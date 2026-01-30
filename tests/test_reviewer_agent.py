@@ -1,10 +1,10 @@
 """Tests for Reviewer Agent."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from agents.reviewer_agent import ReviewDecision, ReviewerAgent, ReviewResult
+from agents.reviewer_agent import ReviewDecision, ReviewerAgent
 from agents.utils.github_client import CIStatus, IssueDetails, PRDetails
 
 
