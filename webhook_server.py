@@ -18,6 +18,7 @@ from agents.task_queue import (
     start_consumer_thread,
 )
 from agents.utils.github_app import get_installation_id_for_repo, load_private_key
+from agents.utils.llm_client import get_token_budget
 
 load_dotenv()
 
@@ -193,15 +194,31 @@ def health():
     """Health check endpoint."""
     try:
         qm = get_queue_manager()
+        budget = get_token_budget()
         if qm.is_healthy():
             stats = qm.get_queue_stats()
-            return jsonify({"status": "ok", "queue": stats})
+            return jsonify({
+                "status": "ok",
+                "queue": stats,
+                "token_budget": budget.get_status(),
+            })
         return jsonify({"status": "degraded", "error": "Queue not healthy"}), 503
     except QueueConnectionError as e:
         return jsonify({"status": "degraded", "error": str(e)}), 503
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@app.route("/budget", methods=["GET"])
+def budget_status():
+    """Get current LLM token budget status."""
+    try:
+        budget = get_token_budget()
+        return jsonify(budget.get_status())
+    except Exception as e:
+        logger.error(f"Budget check failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/webhook", methods=["POST"])

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any
@@ -11,6 +12,178 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+class BudgetExceededError(Exception):
+    """Raised when token budget is exceeded."""
+
+    def __init__(self, message: str, tokens_used: int, budget: int):
+        super().__init__(message)
+        self.tokens_used = tokens_used
+        self.budget = budget
+
+
+class TokenBudget:
+    """Track and enforce token usage budgets.
+
+    Supports hourly and daily limits with automatic reset.
+    Thread-safe for concurrent access.
+    """
+
+    def __init__(
+        self,
+        hourly_limit: int | None = None,
+        daily_limit: int | None = None,
+    ):
+        """Initialize token budget tracker.
+
+        Args:
+            hourly_limit: Maximum tokens per hour. None = unlimited.
+            daily_limit: Maximum tokens per day. None = unlimited.
+        """
+        self._hourly_limit = hourly_limit
+        self._daily_limit = daily_limit
+
+        self._hourly_tokens = 0
+        self._daily_tokens = 0
+
+        self._hour_start = time.time()
+        self._day_start = time.time()
+
+        self._lock = threading.Lock()
+
+        logger.info(
+            f"Token budget initialized: hourly={hourly_limit or 'unlimited'}, "
+            f"daily={daily_limit or 'unlimited'}"
+        )
+
+    def _maybe_reset(self) -> None:
+        """Reset counters if time window has passed."""
+        now = time.time()
+
+        # Reset hourly counter
+        if now - self._hour_start >= 3600:
+            logger.info(
+                f"Hourly budget reset. Used {self._hourly_tokens} tokens last hour."
+            )
+            self._hourly_tokens = 0
+            self._hour_start = now
+
+        # Reset daily counter
+        if now - self._day_start >= 86400:
+            logger.info(
+                f"Daily budget reset. Used {self._daily_tokens} tokens last day."
+            )
+            self._daily_tokens = 0
+            self._day_start = now
+
+    def check_budget(self, estimated_tokens: int = 0) -> None:
+        """Check if request would exceed budget.
+
+        Args:
+            estimated_tokens: Estimated tokens for the request.
+
+        Raises:
+            BudgetExceededError: If budget would be exceeded.
+        """
+        with self._lock:
+            self._maybe_reset()
+
+            if self._hourly_limit is not None:
+                if self._hourly_tokens + estimated_tokens > self._hourly_limit:
+                    raise BudgetExceededError(
+                        f"Hourly token budget exceeded: {self._hourly_tokens}/{self._hourly_limit}",
+                        tokens_used=self._hourly_tokens,
+                        budget=self._hourly_limit,
+                    )
+
+            if self._daily_limit is not None:
+                if self._daily_tokens + estimated_tokens > self._daily_limit:
+                    raise BudgetExceededError(
+                        f"Daily token budget exceeded: {self._daily_tokens}/{self._daily_limit}",
+                        tokens_used=self._daily_tokens,
+                        budget=self._daily_limit,
+                    )
+
+    def record_usage(self, tokens: int) -> None:
+        """Record token usage after a request.
+
+        Args:
+            tokens: Number of tokens used.
+        """
+        with self._lock:
+            self._maybe_reset()
+            self._hourly_tokens += tokens
+            self._daily_tokens += tokens
+
+            # Log warnings at 80% and 95% thresholds
+            if self._hourly_limit:
+                pct = self._hourly_tokens / self._hourly_limit
+                if pct >= 0.95:
+                    logger.warning(
+                        f"Hourly token budget at {pct:.0%}: "
+                        f"{self._hourly_tokens}/{self._hourly_limit}"
+                    )
+                elif pct >= 0.80:
+                    logger.info(
+                        f"Hourly token budget at {pct:.0%}: "
+                        f"{self._hourly_tokens}/{self._hourly_limit}"
+                    )
+
+            if self._daily_limit:
+                pct = self._daily_tokens / self._daily_limit
+                if pct >= 0.95:
+                    logger.warning(
+                        f"Daily token budget at {pct:.0%}: "
+                        f"{self._daily_tokens}/{self._daily_limit}"
+                    )
+                elif pct >= 0.80:
+                    logger.info(
+                        f"Daily token budget at {pct:.0%}: "
+                        f"{self._daily_tokens}/{self._daily_limit}"
+                    )
+
+    def get_status(self) -> dict[str, Any]:
+        """Get current budget status.
+
+        Returns:
+            Dictionary with current usage and limits.
+        """
+        with self._lock:
+            self._maybe_reset()
+            return {
+                "hourly_tokens": self._hourly_tokens,
+                "hourly_limit": self._hourly_limit,
+                "hourly_remaining": (
+                    self._hourly_limit - self._hourly_tokens
+                    if self._hourly_limit
+                    else None
+                ),
+                "daily_tokens": self._daily_tokens,
+                "daily_limit": self._daily_limit,
+                "daily_remaining": (
+                    self._daily_limit - self._daily_tokens
+                    if self._daily_limit
+                    else None
+                ),
+            }
+
+
+# Global token budget instance (shared across all LLM clients)
+_token_budget: TokenBudget | None = None
+
+
+def get_token_budget() -> TokenBudget:
+    """Get or create the global token budget tracker."""
+    global _token_budget
+    if _token_budget is None:
+        hourly = os.environ.get("LLM_HOURLY_TOKEN_LIMIT")
+        daily = os.environ.get("LLM_DAILY_TOKEN_LIMIT")
+        _token_budget = TokenBudget(
+            hourly_limit=int(hourly) if hourly else None,
+            daily_limit=int(daily) if daily else None,
+        )
+    return _token_budget
 
 
 class LLMResponse(BaseModel):
@@ -371,8 +544,13 @@ class LLMClient:
             LLMResponse with the generated content.
 
         Raises:
+            BudgetExceededError: If token budget is exceeded.
             Exception: If all retries fail.
         """
+        # Check budget before making request
+        budget = get_token_budget()
+        budget.check_budget(estimated_tokens=max_tokens)
+
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -384,6 +562,10 @@ class LLMClient:
                     max_tokens=max_tokens,
                 )
                 self._total_tokens_used += response.total_tokens
+
+                # Record actual usage in budget tracker
+                budget.record_usage(response.total_tokens)
+
                 logger.info(
                     f"LLM response: {response.total_tokens} tokens "
                     f"(total: {self._total_tokens_used})"
