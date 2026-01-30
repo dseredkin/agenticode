@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from github import Auth, Github, GithubException
+from github import Auth, Github, GithubException, InputGitTreeElement
 from github.PullRequest import PullRequest
 from github.Repository import Repository
 from pydantic import BaseModel
@@ -203,12 +203,13 @@ class GitHubClient:
         tree_elements = []
         for file_change in files:
             blob = self._repo.create_git_blob(file_change.content, "utf-8")
-            tree_elements.append({
-                "path": file_change.path,
-                "mode": "100644",
-                "type": "blob",
-                "sha": blob.sha,
-            })
+            element = InputGitTreeElement(
+                path=file_change.path,
+                mode="100644",
+                type="blob",
+                sha=blob.sha,
+            )
+            tree_elements.append(element)
             logger.info(f"Staged file: {file_change.path}")
 
         new_tree = self._repo.create_git_tree(tree_elements, base_tree)
