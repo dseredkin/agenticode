@@ -85,7 +85,30 @@ def get_huey(db_path: str | None = None) -> SqliteHuey:
 huey = get_huey()
 
 
-def start_consumer_thread(workers: int = 2) -> None:
+def flush_pending_tasks() -> int:
+    """Flush all pending tasks from the queue.
+
+    Call this on startup to clear stale tasks from previous runs.
+
+    Returns:
+        Number of tasks flushed.
+    """
+    try:
+        count = 0
+        while True:
+            task = huey.dequeue()
+            if task is None:
+                break
+            count += 1
+        if count > 0:
+            logger.info(f"[Queue] Flushed {count} stale tasks")
+        return count
+    except Exception as e:
+        logger.warning(f"[Queue] Failed to flush tasks: {e}")
+        return 0
+
+
+def start_consumer_thread(workers: int = 2, flush_on_start: bool = True) -> None:
     """Start Huey consumer in a background thread.
 
     This allows running the task queue without a separate worker process.
@@ -93,12 +116,16 @@ def start_consumer_thread(workers: int = 2) -> None:
 
     Args:
         workers: Number of worker threads.
+        flush_on_start: Clear stale tasks before starting consumer.
     """
     global _consumer_thread
 
     if _consumer_started.is_set():
         logger.info("[Queue] Consumer already running")
         return
+
+    if flush_on_start:
+        flush_pending_tasks()
 
     def run_consumer() -> None:
         try:
