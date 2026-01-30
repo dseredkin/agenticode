@@ -128,6 +128,8 @@ def start_consumer_thread(workers: int = 2) -> None:
 def run_issue_moderator(issue_number: int) -> dict:
     """Task: Run issue moderator on an issue.
 
+    After classification, automatically triggers code generation for bugs.
+
     Args:
         issue_number: GitHub issue number to moderate.
 
@@ -141,6 +143,15 @@ def run_issue_moderator(issue_number: int) -> dict:
     try:
         moderator = IssueModerator()
         result = moderator.run(issue_number)
+
+        if result.success and result.classification:
+            issue_type = result.classification.issue_type
+            if issue_type in ("bug", "suggestion", "documentation"):
+                logger.info(
+                    f"[Queue] Issue #{issue_number} classified as {issue_type}, "
+                    "triggering code generation"
+                )
+                run_code_agent_issue(issue_number)
 
         return {
             "success": result.success,
