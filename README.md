@@ -5,35 +5,34 @@ GitHub-Native SDLC Automation System that automates the software development lif
 ## Features
 
 - **Code Agent**: Reads GitHub issues and generates PRs with code
-- **Reviewer Agent**: Reviews PRs and approves/requests changes
-- **Interaction Orchestrator**: Full automation loop (issue -> PR -> review -> iterate)
+- **Reviewer Agent**: Reviews PRs and approves/requests changes (posts all comments at once)
+- **Event-Driven Architecture**: Agents coordinate via GitHub webhooks, not tight loops
 - **Webhook Server**: Deployable server for real-time GitHub event handling
 - **Multi-Provider LLM Support**: OpenAI, Grok (xAI), YandexGPT
 
 ## How It Works
 
+The system uses an event-driven architecture where each agent responds to GitHub webhook events:
+
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────────┐
-│ GitHub Issue│────>│ Code Agent  │────>│ Creates PR with generated code  │
-│ (auto-generate)   │             │     │                                 │
-└─────────────┘     └─────────────┘     └────────────────┬────────────────┘
-                                                         │
-                    ┌─────────────────────────────────────┘
-                    v
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        Review Loop (Orchestrator)                        │
-│  ┌──────────────┐    ┌─────────────────┐    ┌──────────────────────┐   │
-│  │Reviewer Agent│───>│ APPROVE?        │───>│ Done (PR approved)   │   │
-│  │ reviews PR   │    │                 │    └──────────────────────┘   │
-│  └──────────────┘    │ REQUEST_CHANGES │                               │
-│                      └────────┬────────┘                               │
-│                               │                                         │
-│                               v                                         │
-│                      ┌─────────────────┐                               │
-│                      │ Code Agent      │──── Loop until approved       │
-│                      │ iterates on     │     or max rounds reached     │
-│                      │ feedback        │                               │
-│                      └─────────────────┘                               │
+│                         Event-Driven Flow                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. ISSUE EVENT (auto-generate label)                                   │
+│     └──> Code Agent creates PR with generated code                      │
+│                                                                         │
+│  2. PULL REQUEST EVENT (opened/synchronize)                             │
+│     └──> Reviewer Agent reviews PR                                      │
+│         └──> Posts all comments at once                                 │
+│         └──> Sets status: APPROVE or REQUEST_CHANGES                    │
+│                                                                         │
+│  3. PULL REQUEST REVIEW EVENT (changes_requested)                       │
+│     └──> Code Agent iterates on feedback                                │
+│         └──> Pushes new commit (triggers step 2 again)                  │
+│                                                                         │
+│  Loop continues until: APPROVED or MAX_ITERATIONS reached               │
+│                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -155,7 +154,10 @@ PR_NUMBER=456 docker-compose run reviewer-agent
    - **Payload URL**: `https://your-app-url.ondigitalocean.app/webhook`
    - **Content type**: `application/json`
    - **Secret**: Same as `WEBHOOK_SECRET`
-   - **Events**: Select `Issues` and `Pull requests`
+   - **Events**: Select individual events:
+     - `Issues`
+     - `Pull requests`
+     - `Pull request reviews`
 
 ### Using doctl CLI
 

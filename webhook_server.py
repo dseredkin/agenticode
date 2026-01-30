@@ -1,4 +1,4 @@
-"""Local webhook server for GitHub events."""
+"""Webhook server for GitHub events - event-driven agent coordination."""
 
 import hashlib
 import hmac
@@ -22,18 +22,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "5"))
 
 
 def verify_signature(payload: bytes, signature: str) -> bool:
-    """Verify GitHub webhook signature.
-
-    Args:
-        payload: Raw request body.
-        signature: X-Hub-Signature-256 header value.
-
-    Returns:
-        True if signature is valid or no secret configured.
-    """
+    """Verify GitHub webhook signature."""
     if not WEBHOOK_SECRET:
         return True
 
@@ -53,13 +46,7 @@ def verify_signature(payload: bytes, signature: str) -> bool:
 
 
 def run_agent(command: list[str], event_type: str, event_id: str) -> None:
-    """Run agent in background thread.
-
-    Args:
-        command: Command to execute.
-        event_type: GitHub event type for logging.
-        event_id: Event identifier for logging.
-    """
+    """Run agent in background thread."""
     logger.info(f"[{event_id}] Running: {' '.join(command)}")
     try:
         result = subprocess.run(
@@ -109,6 +96,8 @@ def webhook():
         return handle_issue_event(payload, delivery_id)
     elif event == "pull_request":
         return handle_pr_event(payload, delivery_id)
+    elif event == "pull_request_review":
+        return handle_pr_review_event(payload, delivery_id)
     elif event == "ping":
         logger.info(f"[{delivery_id}] Ping received from GitHub")
         return jsonify({"status": "pong"})
@@ -118,11 +107,9 @@ def webhook():
 
 
 def handle_issue_event(payload: dict, delivery_id: str):
-    """Handle issue events.
+    """Handle issue events - triggers Code Agent to create PR.
 
-    Args:
-        payload: GitHub event payload.
-        delivery_id: Delivery ID for logging.
+    Flow: Issue with 'auto-generate' label -> Code Agent creates PR
     """
     action = payload.get("action", "")
     issue = payload.get("issue", {})
@@ -136,31 +123,28 @@ def handle_issue_event(payload: dict, delivery_id: str):
     labels = [label.get("name", "") for label in issue.get("labels", [])]
 
     if "auto-generate" in labels:
-        # Use orchestrator for full loop: issue -> PR -> review -> iterate
         command = [
             sys.executable,
             "-m",
-            "agents.interaction_orchestrator",
+            "agents.code_agent",
             "--issue",
             str(issue_number),
             "--output-json",
         ]
         thread = Thread(
             target=run_agent,
-            args=(command, "interaction_orchestrator", delivery_id),
+            args=(command, "code_agent", delivery_id),
         )
         thread.start()
-        return jsonify({"status": "processing", "agent": "interaction_orchestrator"})
+        return jsonify({"status": "processing", "agent": "code_agent"})
 
-    return jsonify({"status": "ignored", "reason": "no matching trigger"})
+    return jsonify({"status": "ignored", "reason": "no auto-generate label"})
 
 
 def handle_pr_event(payload: dict, delivery_id: str):
-    """Handle pull request events.
+    """Handle PR events - triggers Reviewer Agent to review.
 
-    Args:
-        payload: GitHub event payload.
-        delivery_id: Delivery ID for logging.
+    Flow: PR opened/updated with 'feat:' prefix -> Reviewer reviews
     """
     action = payload.get("action", "")
     pr = payload.get("pull_request", {})
@@ -177,79 +161,163 @@ def handle_pr_event(payload: dict, delivery_id: str):
     if not (title.startswith("feat:") or "auto-review" in labels):
         return jsonify({"status": "ignored", "reason": "no auto-review trigger"})
 
-    # Use orchestrator for full review loop
+    # Check iteration count from labels
+    iteration = get_iteration_from_labels(labels)
+    if iteration >= MAX_ITERATIONS:
+        logger.warning(f"[{delivery_id}] Max iterations reached for PR #{pr_number}")
+        return jsonify({"status": "ignored", "reason": "max iterations reached"})
+
     command = [
         sys.executable,
         "-m",
-        "agents.interaction_orchestrator",
+        "agents.reviewer_agent",
         "--pr",
         str(pr_number),
         "--output-json",
     ]
     thread = Thread(
         target=run_agent,
-        args=(command, "interaction_orchestrator", delivery_id),
+        args=(command, "reviewer_agent", delivery_id),
     )
     thread.start()
 
-    return jsonify({"status": "processing", "agent": "interaction_orchestrator"})
+    return jsonify({"status": "processing", "agent": "reviewer_agent"})
+
+
+def handle_pr_review_event(payload: dict, delivery_id: str):
+    """Handle PR review events - triggers Code Agent to iterate on feedback.
+
+    Flow: Review with REQUEST_CHANGES -> Code Agent iterates
+    """
+    action = payload.get("action", "")
+    review = payload.get("review", {})
+    pr = payload.get("pull_request", {})
+    pr_number = pr.get("number")
+    review_state = review.get("state", "")
+    reviewer = review.get("user", {}).get("login", "unknown")
+
+    logger.info(f"[{delivery_id}] PR #{pr_number} review by {reviewer}: {review_state}")
+
+    if action != "submitted":
+        return jsonify({"status": "ignored", "reason": f"action={action}"})
+
+    if review_state != "changes_requested":
+        logger.info(f"[{delivery_id}] Review state is {review_state}, not iterating")
+        return jsonify({"status": "ignored", "reason": f"state={review_state}"})
+
+    title = pr.get("title", "")
+    labels = [label.get("name", "") for label in pr.get("labels", [])]
+
+    if not (title.startswith("feat:") or "auto-review" in labels):
+        return jsonify({"status": "ignored", "reason": "not an auto-review PR"})
+
+    # Check iteration count
+    iteration = get_iteration_from_labels(labels)
+    if iteration >= MAX_ITERATIONS:
+        logger.warning(f"[{delivery_id}] Max iterations reached for PR #{pr_number}")
+        return jsonify({"status": "ignored", "reason": "max iterations reached"})
+
+    command = [
+        sys.executable,
+        "-m",
+        "agents.code_agent",
+        "--pr",
+        str(pr_number),
+        "--output-json",
+    ]
+    thread = Thread(
+        target=run_agent,
+        args=(command, "code_agent", delivery_id),
+    )
+    thread.start()
+
+    return jsonify({"status": "processing", "agent": "code_agent"})
+
+
+def get_iteration_from_labels(labels: list[str]) -> int:
+    """Extract iteration count from PR labels."""
+    for label in labels:
+        if label.startswith("iteration-"):
+            try:
+                return int(label.split("-")[1])
+            except (IndexError, ValueError):
+                pass
+    return 0
 
 
 @app.route("/trigger/issue/<int:issue_number>", methods=["POST"])
 def trigger_issue(issue_number: int):
-    """Manually trigger full orchestration for an issue.
-
-    Args:
-        issue_number: GitHub issue number.
-    """
+    """Manually trigger Code Agent for an issue."""
     delivery_id = f"manual-issue-{issue_number}"
     command = [
         sys.executable,
         "-m",
-        "agents.interaction_orchestrator",
+        "agents.code_agent",
         "--issue",
         str(issue_number),
         "--output-json",
     ]
     thread = Thread(
         target=run_agent,
-        args=(command, "interaction_orchestrator", delivery_id),
+        args=(command, "code_agent", delivery_id),
     )
     thread.start()
     return jsonify(
         {
             "status": "processing",
-            "agent": "interaction_orchestrator",
+            "agent": "code_agent",
             "issue": issue_number,
         }
     )
 
 
-@app.route("/trigger/pr/<int:pr_number>", methods=["POST"])
-def trigger_pr_orchestration(pr_number: int):
-    """Manually trigger full orchestration for a PR.
-
-    Args:
-        pr_number: GitHub PR number.
-    """
-    delivery_id = f"manual-pr-{pr_number}"
+@app.route("/trigger/pr/<int:pr_number>/review", methods=["POST"])
+def trigger_pr_review(pr_number: int):
+    """Manually trigger Reviewer Agent for a PR."""
+    delivery_id = f"manual-review-{pr_number}"
     command = [
         sys.executable,
         "-m",
-        "agents.interaction_orchestrator",
+        "agents.reviewer_agent",
         "--pr",
         str(pr_number),
         "--output-json",
     ]
     thread = Thread(
         target=run_agent,
-        args=(command, "interaction_orchestrator", delivery_id),
+        args=(command, "reviewer_agent", delivery_id),
     )
     thread.start()
     return jsonify(
         {
             "status": "processing",
-            "agent": "interaction_orchestrator",
+            "agent": "reviewer_agent",
+            "pr": pr_number,
+        }
+    )
+
+
+@app.route("/trigger/pr/<int:pr_number>/iterate", methods=["POST"])
+def trigger_pr_iteration(pr_number: int):
+    """Manually trigger Code Agent to iterate on PR feedback."""
+    delivery_id = f"manual-iterate-{pr_number}"
+    command = [
+        sys.executable,
+        "-m",
+        "agents.code_agent",
+        "--pr",
+        str(pr_number),
+        "--output-json",
+    ]
+    thread = Thread(
+        target=run_agent,
+        args=(command, "code_agent", delivery_id),
+    )
+    thread.start()
+    return jsonify(
+        {
+            "status": "processing",
+            "agent": "code_agent",
             "pr": pr_number,
         }
     )
@@ -258,9 +326,15 @@ def trigger_pr_orchestration(pr_number: int):
 if __name__ == "__main__":
     port = int(os.environ.get("WEBHOOK_PORT", "8000"))
     logger.info(f"Starting webhook server on port {port}")
+    logger.info("Event-driven flow:")
+    logger.info("  Issue (auto-generate) -> Code Agent creates PR")
+    logger.info("  PR (opened/sync) -> Reviewer Agent reviews")
+    logger.info("  Review (changes_requested) -> Code Agent iterates")
+    logger.info("")
     logger.info("Endpoints:")
     logger.info("  POST /webhook - GitHub webhook receiver")
-    logger.info("  POST /trigger/issue/<number> - Manual orchestration from issue")
-    logger.info("  POST /trigger/pr/<number> - Manual orchestration from PR")
+    logger.info("  POST /trigger/issue/<n> - Manual: Code Agent from issue")
+    logger.info("  POST /trigger/pr/<n>/review - Manual: Reviewer Agent")
+    logger.info("  POST /trigger/pr/<n>/iterate - Manual: Code Agent iterate")
     logger.info("  GET  /health - Health check")
     app.run(host="0.0.0.0", port=port, debug=False)
