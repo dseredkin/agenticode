@@ -15,7 +15,6 @@ from agents.task_queue import (
     TaskQueueManager,
     start_consumer_thread,
 )
-from agents.utils.installation_store import get_installation_store
 
 load_dotenv()
 
@@ -84,56 +83,6 @@ def extract_installation_context(payload: dict) -> tuple[int | None, str | None]
     return installation_id, repo_full_name
 
 
-def ensure_installation_registered(payload: dict, delivery_id: str) -> None:
-    """Ensure installation and repository are registered in the store.
-
-    Creates the installation record if it doesn't exist, and adds the
-    repository to the installation.
-
-    Args:
-        payload: GitHub webhook payload.
-        delivery_id: Webhook delivery ID for logging.
-    """
-    installation = payload.get("installation", {})
-    installation_id = installation.get("id")
-    if not installation_id:
-        return
-
-    account = installation.get("account", {})
-    account_login = account.get("login", "")
-    account_type = account.get("type", "User")
-
-    repository = payload.get("repository", {})
-    repo_full_name = repository.get("full_name")
-
-    if not account_login:
-        return
-
-    store = get_installation_store()
-    existing = store.get_installation(installation_id)
-
-    if not existing:
-        logger.info(
-            f"[{delivery_id}] Auto-registering installation {installation_id} "
-            f"for {account_login}"
-        )
-        repos = [repo_full_name] if repo_full_name else []
-        store.add_installation(
-            installation_id=installation_id,
-            account_login=account_login,
-            account_type=account_type,
-            repositories=repos,
-        )
-    elif repo_full_name:
-        # Installation exists, ensure repo is registered
-        if not store.is_repo_registered(repo_full_name):
-            logger.info(
-                f"[{delivery_id}] Auto-registering repo {repo_full_name} "
-                f"for installation {installation_id}"
-            )
-            store.add_repositories(installation_id, [repo_full_name])
-
-
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint."""
@@ -170,11 +119,7 @@ def webhook():
     logger.info(f"[{delivery_id}] Received event: {event}")
 
     try:
-        if event == "installation":
-            return handle_installation_event(payload, delivery_id)
-        elif event == "installation_repositories":
-            return handle_installation_repositories_event(payload, delivery_id)
-        elif event == "issues":
+        if event == "issues":
             return handle_issue_event(payload, delivery_id)
         elif event == "pull_request":
             return handle_pr_event(payload, delivery_id)
@@ -224,134 +169,6 @@ def webhook():
         )
 
 
-def handle_installation_event(payload: dict, delivery_id: str):
-    """Handle GitHub App installation events.
-
-    Triggered when:
-    - App is installed (created)
-    - App is uninstalled (deleted)
-    - App is suspended/unsuspended
-    """
-    action = payload.get("action", "")
-    installation = payload.get("installation", {})
-    installation_id = installation.get("id")
-    account = installation.get("account", {})
-    account_login = account.get("login", "")
-    account_type = account.get("type", "")
-
-    logger.info(
-        f"[{delivery_id}] Installation {installation_id} ({account_login}): {action}"
-    )
-
-    store = get_installation_store()
-
-    if action == "created":
-        repositories = payload.get("repositories", [])
-        repo_names = [repo.get("full_name") for repo in repositories]
-
-        store.add_installation(
-            installation_id=installation_id,
-            account_login=account_login,
-            account_type=account_type,
-            repositories=repo_names,
-        )
-
-        return jsonify(
-            {
-                "status": "created",
-                "installation_id": installation_id,
-                "account": account_login,
-                "repositories": len(repo_names),
-            }
-        )
-
-    elif action == "deleted":
-        store.remove_installation(installation_id)
-        return jsonify(
-            {
-                "status": "deleted",
-                "installation_id": installation_id,
-            }
-        )
-
-    elif action == "suspend":
-        store.suspend_installation(installation_id)
-        return jsonify(
-            {
-                "status": "suspended",
-                "installation_id": installation_id,
-            }
-        )
-
-    elif action == "unsuspend":
-        store.unsuspend_installation(installation_id)
-        return jsonify(
-            {
-                "status": "unsuspended",
-                "installation_id": installation_id,
-            }
-        )
-
-    return jsonify({"status": "ignored", "action": action})
-
-
-def handle_installation_repositories_event(payload: dict, delivery_id: str):
-    """Handle repository additions/removals from an installation.
-
-    Triggered when repositories are added to or removed from an installation.
-    """
-    action = payload.get("action", "")
-    installation = payload.get("installation", {})
-    installation_id = installation.get("id")
-    account = installation.get("account", {})
-    account_login = account.get("login", "")
-    account_type = account.get("type", "")
-
-    logger.info(f"[{delivery_id}] Installation {installation_id} repos: {action}")
-
-    store = get_installation_store()
-
-    # Ensure installation exists before adding repositories
-    existing = store.get_installation(installation_id)
-    if not existing and account_login:
-        logger.info(
-            f"[{delivery_id}] Creating missing installation {installation_id} "
-            f"for {account_login}"
-        )
-        store.add_installation(
-            installation_id=installation_id,
-            account_login=account_login,
-            account_type=account_type,
-            repositories=[],
-        )
-
-    if action == "added":
-        repositories = payload.get("repositories_added", [])
-        repo_names = [repo.get("full_name") for repo in repositories]
-        count = store.add_repositories(installation_id, repo_names)
-        return jsonify(
-            {
-                "status": "repos_added",
-                "installation_id": installation_id,
-                "count": count,
-            }
-        )
-
-    elif action == "removed":
-        repositories = payload.get("repositories_removed", [])
-        repo_names = [repo.get("full_name") for repo in repositories]
-        count = store.remove_repositories(installation_id, repo_names)
-        return jsonify(
-            {
-                "status": "repos_removed",
-                "installation_id": installation_id,
-                "count": count,
-            }
-        )
-
-    return jsonify({"status": "ignored", "action": action})
-
-
 def handle_issue_event(payload: dict, delivery_id: str):
     """Handle issue events.
 
@@ -364,9 +181,6 @@ def handle_issue_event(payload: dict, delivery_id: str):
     issue_number = issue.get("number")
 
     installation_id, repository = extract_installation_context(payload)
-
-    # Auto-register installation and repository if not already registered
-    ensure_installation_registered(payload, delivery_id)
 
     logger.info(
         f"[{delivery_id}] Issue #{issue_number}: {action} "
@@ -438,9 +252,6 @@ def handle_pr_event(payload: dict, delivery_id: str):
 
     installation_id, repository = extract_installation_context(payload)
 
-    # Auto-register installation and repository if not already registered
-    ensure_installation_registered(payload, delivery_id)
-
     logger.info(
         f"[{delivery_id}] PR #{pr_number}: {action} - {title} "
         f"(installation={installation_id}, repo={repository})"
@@ -496,9 +307,6 @@ def handle_pr_review_event(payload: dict, delivery_id: str):
     reviewer = review.get("user", {}).get("login", "unknown")
 
     installation_id, repository = extract_installation_context(payload)
-
-    # Auto-register installation and repository if not already registered
-    ensure_installation_registered(payload, delivery_id)
 
     logger.info(
         f"[{delivery_id}] PR #{pr_number} review by {reviewer}: {review_state} "
