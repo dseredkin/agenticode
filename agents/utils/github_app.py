@@ -64,6 +64,43 @@ def get_installation_token(
     return token
 
 
+def get_installation_id_for_repo(
+    app_id: str,
+    private_key: str,
+    repository: str,
+) -> int:
+    """Get the installation ID for a specific repository.
+
+    Args:
+        app_id: The GitHub App ID.
+        private_key: The private key content (PEM format).
+        repository: Repository in owner/repo format.
+
+    Returns:
+        Installation ID for the repository.
+
+    Raises:
+        httpx.HTTPStatusError: If the app is not installed on the repository.
+    """
+    jwt_token = generate_jwt(app_id, private_key)
+
+    url = f"https://api.github.com/repos/{repository}/installation"
+    headers = {
+        "Authorization": f"Bearer {jwt_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    response = httpx.get(url, headers=headers)
+    response.raise_for_status()
+
+    data = response.json()
+    installation_id: int = data["id"]
+    logger.info(f"Found installation {installation_id} for {repository}")
+
+    return installation_id
+
+
 def load_private_key(path: str) -> str:
     """Load private key from file.
 

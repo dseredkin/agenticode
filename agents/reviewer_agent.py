@@ -12,6 +12,7 @@ from typing import Any
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+from agents.utils.github_app import get_installation_id_for_repo
 from agents.utils.github_client import (
     CIStatus,
     GitHubClient,
@@ -78,13 +79,26 @@ class ReviewerAgent:
         """
         # Use separate reviewer app credentials if available
         reviewer_app_id = os.environ.get("GITHUB_APP_REVIEWER_ID")
-        reviewer_app_key = os.environ.get("GITHUB_APP_REVIEWER_PRIVATE_KEY")
+        reviewer_app_key_env = os.environ.get("GITHUB_APP_REVIEWER_PRIVATE_KEY")
+
+        # Handle private key (can be path or content)
+        reviewer_app_key = None
+        if reviewer_app_key_env:
+            if reviewer_app_key_env.startswith("-----BEGIN"):
+                reviewer_app_key = reviewer_app_key_env
+            else:
+                from agents.utils.github_app import load_private_key
+                reviewer_app_key = load_private_key(reviewer_app_key_env)
 
         if github_client:
             self._github = github_client
-        elif installation_id:
+        elif reviewer_app_id and reviewer_app_key and repository:
+            # Look up the reviewer app's installation ID for this repository
+            reviewer_installation_id = get_installation_id_for_repo(
+                reviewer_app_id, reviewer_app_key, repository
+            )
             self._github = GitHubClient(
-                installation_id=installation_id,
+                installation_id=reviewer_installation_id,
                 repository=repository,
                 app_id=reviewer_app_id,
                 app_private_key=reviewer_app_key,
