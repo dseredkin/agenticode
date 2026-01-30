@@ -185,7 +185,7 @@ class GitHubClient:
         message: str,
         branch: str,
     ) -> str:
-        """Commit file changes to a branch.
+        """Commit file changes to a branch as a single atomic commit.
 
         Args:
             files: List of FileChange objects with path and content.
@@ -195,33 +195,28 @@ class GitHubClient:
         Returns:
             The commit SHA.
         """
-        for file_change in files:
-            try:
-                existing = self._repo.get_contents(file_change.path, ref=branch)
-                if isinstance(existing, list):
-                    raise ValueError(f"Path is a directory: {file_change.path}")
-                self._repo.update_file(
-                    file_change.path,
-                    message,
-                    file_change.content,
-                    existing.sha,
-                    branch=branch,
-                )
-                logger.info(f"Updated file: {file_change.path}")
-            except GithubException as e:
-                if e.status == 404:
-                    self._repo.create_file(
-                        file_change.path,
-                        message,
-                        file_change.content,
-                        branch=branch,
-                    )
-                    logger.info(f"Created file: {file_change.path}")
-                else:
-                    raise
-
         ref = self._repo.get_git_ref(f"heads/{branch}")
-        return ref.object.sha
+        base_sha = ref.object.sha
+        base_commit = self._repo.get_git_commit(base_sha)
+        base_tree = base_commit.tree
+
+        tree_elements = []
+        for file_change in files:
+            blob = self._repo.create_git_blob(file_change.content, "utf-8")
+            tree_elements.append({
+                "path": file_change.path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": blob.sha,
+            })
+            logger.info(f"Staged file: {file_change.path}")
+
+        new_tree = self._repo.create_git_tree(tree_elements, base_tree)
+        new_commit = self._repo.create_git_commit(message, new_tree, [base_commit])
+        ref.edit(new_commit.sha)
+
+        logger.info(f"Created commit {new_commit.sha[:7]} with {len(files)} files")
+        return new_commit.sha
 
     def create_pr(
         self,
