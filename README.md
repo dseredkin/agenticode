@@ -2,6 +2,21 @@
 
 GitHub-Native SDLC Automation System - automates the software development lifecycle within GitHub.
 
+## GitHub Apps
+
+AgentiCode uses two separate GitHub Apps to maintain role isolation between the Code Agent and Reviewer Agent:
+
+- **[agenticode-contributor](https://github.com/apps/agenticode-contributor)** - Used by the Code Agent to create branches, push code, and create pull requests
+- **[agenticode-reviewer](https://github.com/apps/agenticode-reviewer)** - Used by the Reviewer Agent to review PRs and approve/request changes
+
+Using separate GitHub Apps ensures that the Code Agent cannot approve its own PRs, maintaining proper separation of concerns in the review process.
+
+### Installing the Apps
+
+1. Visit the app pages above and click "Install"
+2. Select the repositories you want to enable AgentiCode for
+3. Configure the webhook URL to point to your AgentiCode server
+
 ## Features
 
 - **Issue Moderator**: Classifies issues (bug/suggestion/documentation/question)
@@ -9,6 +24,30 @@ GitHub-Native SDLC Automation System - automates the software development lifecy
 - **Reviewer Agent**: Analyzes PRs, checks CI, publishes reviews
 - **Iterative Cycle**: Automatic fixes based on reviewer feedback
 - **Webhook Server**: Real-time GitHub event handling
+
+## How Agents Work
+
+### Issue Moderator
+1. Fetches issue from GitHub
+2. Checks if already moderated (skips if so)
+3. Sends issue title/body to LLM for classification
+4. Applies labels and posts a templated response
+
+### Code Agent
+1. Fetches issue details and repository structure
+2. Finds relevant existing code for context (keyword-based search)
+3. Sends context + issue to LLM to generate code
+4. Validates generated code (syntax, linting, type checks)
+5. If validation fails, retries with error feedback (up to `MAX_ITERATIONS`)
+6. Creates PR when validation passes
+
+### Reviewer Agent
+1. Fetches PR details and linked issue (if any)
+2. Waits for CI checks to complete
+3. Sends diff + CI status + issue context to LLM for analysis
+4. Posts review: `APPROVE` or `REQUEST_CHANGES` with specific feedback
+
+When a review requests changes, the Code Agent automatically picks up the feedback and pushes fixes, restarting the review cycle.
 
 ## Architecture
 
@@ -43,12 +82,12 @@ GitHub-Native SDLC Automation System - automates the software development lifecy
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-repo/agenticode.git
+git clone https://github.com/dseredkin/agenticode.git
 cd agenticode
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env with your settings (see Configuration section)
 
 # 3. Start the service
 docker-compose up -d
@@ -61,31 +100,60 @@ Service will be available at `http://localhost:8000`
 
 ### Local Setup
 
+**Prerequisites:**
+- Python 3.11+
+- Redis (for task queue)
+- [uv](https://github.com/astral-sh/uv) package manager
+
 ```bash
-# 1. Install uv
+# 1. Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Install dependencies
+# 2. Clone and enter repository
+git clone https://github.com/dseredkin/agenticode.git
+cd agenticode
+
+# 3. Install dependencies
 uv sync
 
-# 3. Configure environment
-cp .env.example .env
-# Edit .env with your settings
+# 4. Start Redis (required for task queue)
+# Using Docker:
+docker run -d --name redis -p 6379:6379 redis:alpine
+# Or install Redis locally and run: redis-server
 
-# 4. Run webhook server
+# 5. Configure environment
+cp .env.example .env
+# Edit .env with your settings (see Configuration section)
+
+# 6. Run the webhook server
 uv run python webhook_server.py
 ```
+
+The server will start at `http://localhost:8000`. For local development, you can use [ngrok](https://ngrok.com) or similar tools to expose the webhook endpoint to GitHub:
+
+```bash
+ngrok http 8000
+```
+
+Then configure the ngrok URL as your GitHub webhook endpoint.
 
 ## Configuration
 
 Create `.env` file:
 
 ```bash
-# GitHub
-GITHUB_TOKEN=ghp_xxx                    # PAT with repo access
-CODE_AGENT_TOKEN=ghp_xxx                # PAT for Code Agent
-REVIEWER_AGENT_TOKEN=ghp_xxx            # PAT for Reviewer Agent (different account!)
-GITHUB_REPOSITORY=owner/repo
+# GitHub Repository
+GITHUB_REPOSITORY=owner/repo            # Repository in owner/repo format
+
+# Authentication (choose one approach)
+
+# Option 1: GitHub Apps (recommended)
+# Install the apps and they handle authentication automatically via webhooks
+
+# Option 2: Personal Access Tokens
+CODE_AGENT_TOKEN=ghp_xxx                # PAT for Code Agent (creates PRs)
+REVIEWER_AGENT_TOKEN=ghp_xxx            # PAT for Reviewer Agent (reviews PRs)
+GITHUB_TOKEN=ghp_xxx                    # Fallback PAT (optional)
 
 # LLM Provider (choose one)
 LLM_PROVIDER=openai                     # openai, grok, yandex
@@ -101,13 +169,17 @@ OPENAI_API_KEY=sk-xxx
 # YANDEX_API_KEY=xxx
 # YANDEX_FOLDER_ID=xxx
 
+# Task Queue
+REDIS_URL=redis://localhost:6379/0      # Redis connection URL
+
 # Optional
-MAX_ITERATIONS=5                        # Max generation iterations
-MAX_REVIEW_ROUNDS=3                     # Max review cycles
+MAX_ITERATIONS=5                        # Max code generation attempts
+ITERATION_TIMEOUT=600                   # Seconds per iteration
+WEBHOOK_PORT=8000                       # Webhook server port
 WEBHOOK_SECRET=xxx                      # GitHub webhook secret
 ```
 
-> **Important:** `CODE_AGENT_TOKEN` and `REVIEWER_AGENT_TOKEN` must be from **different GitHub accounts** or use a GitHub App. GitHub doesn't allow users to approve their own PRs.
+> **Important:** If using PATs, `CODE_AGENT_TOKEN` and `REVIEWER_AGENT_TOKEN` must be from **different GitHub accounts**. GitHub doesn't allow users to approve their own PRs. Using the GitHub Apps ([agenticode-contributor](https://github.com/apps/agenticode-contributor) and [agenticode-reviewer](https://github.com/apps/agenticode-reviewer)) is the recommended approach as they handle identity separation automatically.
 
 ## GitHub Actions Workflows
 
