@@ -3,6 +3,7 @@
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
@@ -286,17 +287,30 @@ class GitHubClient:
         base_commit = self._repo.get_git_commit(base_sha)
         base_tree = base_commit.tree
 
+        # Parallel blob creation for all files
+        blob_shas: dict[str, str] = {}
+
+        def create_blob(file_change: FileChange) -> tuple[str, str]:
+            blob = self._repo.create_git_blob(file_change.content, "utf-8")
+            return file_change.path, blob.sha
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(create_blob, fc) for fc in files]
+            for future in as_completed(futures):
+                path, sha = future.result()
+                blob_shas[path] = sha
+                logger.info(f"Staged file: {path}")
+
+        # Build tree elements in original order
         tree_elements = []
         for file_change in files:
-            blob = self._repo.create_git_blob(file_change.content, "utf-8")
             element = InputGitTreeElement(
                 path=file_change.path,
                 mode="100644",
                 type="blob",
-                sha=blob.sha,
+                sha=blob_shas[file_change.path],
             )
             tree_elements.append(element)
-            logger.info(f"Staged file: {file_change.path}")
 
         new_tree = self._repo.create_git_tree(tree_elements, base_tree)
         new_commit = self._repo.create_git_commit(message, new_tree, [base_commit])

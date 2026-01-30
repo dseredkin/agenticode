@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
@@ -275,19 +276,8 @@ class CodeAgent:
                 errors=["No code files generated - LLM response could not be parsed"],
             )
 
-        all_errors: list[str] = []
-        validated_files: list[GeneratedFile] = []
-
-        for file in files:
-            if file.path.endswith(".py"):
-                validation = self._formatter.validate_all(file.content, file.path)
-                if validation.black_result.formatted_code:
-                    file = GeneratedFile(
-                        path=file.path,
-                        content=validation.black_result.formatted_code,
-                    )
-                all_errors.extend(validation.all_errors)
-            validated_files.append(file)
+        # Parallel validation
+        validated_files, all_errors = self._validate_files_parallel(files)
 
         success = len(all_errors) == 0
         if all_errors:
@@ -392,21 +382,87 @@ class CodeAgent:
 
         python_files = [f for f in repo_structure if f.endswith(".py")]
 
-        for file_path in python_files[:10]:
-            content = self._github.get_file_content(file_path)
-            if content:
-                for keyword in keywords:
-                    if keyword.lower() in content.lower():
-                        relevant_files.append(file_path)
-                        break
+        # Parallel fetch file contents for keyword matching
+        file_contents: dict[str, str] = {}
+        files_to_check = python_files[:10]
 
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_path = {
+                executor.submit(self._github.get_file_content, path): path
+                for path in files_to_check
+            }
+            for future in as_completed(future_to_path):
+                path = future_to_path[future]
+                try:
+                    content = future.result()
+                    if content:
+                        file_contents[path] = content
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {path}: {e}")
+
+        # Check for keyword matches
+        for file_path, content in file_contents.items():
+            for keyword in keywords:
+                if keyword.lower() in content.lower():
+                    relevant_files.append(file_path)
+                    break
+
+        # Return relevant files (already fetched, no need to re-fetch)
         result: dict[str, str] = {}
         for file_path in relevant_files[:5]:
-            content = self._github.get_file_content(file_path)
-            if content:
-                result[file_path] = content
+            if file_path in file_contents:
+                result[file_path] = file_contents[file_path]
 
         return result
+
+    def _validate_files_parallel(
+        self, files: list[GeneratedFile]
+    ) -> tuple[list[GeneratedFile], list[str]]:
+        """Validate and format files in parallel.
+
+        Args:
+            files: List of generated files.
+
+        Returns:
+            Tuple of (validated_files, all_errors).
+        """
+        validated_files: list[GeneratedFile] = []
+        all_errors: list[str] = []
+
+        # Separate Python files for validation
+        py_files = [(i, f) for i, f in enumerate(files) if f.path.endswith(".py")]
+        non_py_files = [(i, f) for i, f in enumerate(files) if not f.path.endswith(".py")]
+
+        # Parallel validation for Python files
+        validation_results: dict[int, tuple[GeneratedFile, list[str]]] = {}
+
+        def validate_file(idx: int, file: GeneratedFile) -> tuple[int, GeneratedFile, list[str]]:
+            validation = self._formatter.validate_all(file.content, file.path)
+            if validation.black_result.formatted_code:
+                file = GeneratedFile(
+                    path=file.path,
+                    content=validation.black_result.formatted_code,
+                )
+            return idx, file, validation.all_errors
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(validate_file, i, f) for i, f in py_files]
+            for future in as_completed(futures):
+                idx, file, errors = future.result()
+                validation_results[idx] = (file, errors)
+
+        # Combine results preserving original order
+        all_indexed: list[tuple[int, GeneratedFile]] = []
+        for i, f in non_py_files:
+            all_indexed.append((i, f))
+        for i, (f, errors) in validation_results.items():
+            all_indexed.append((i, f))
+            all_errors.extend(errors)
+
+        all_indexed.sort(key=lambda x: x[0])
+        validated_files = [f for _, f in all_indexed]
+
+        return validated_files, all_errors
 
     def _extract_keywords(self, text: str) -> list[str]:
         """Extract keywords from text for code search.
@@ -638,19 +694,8 @@ Generated by Code Agent
                 error="No code files generated - LLM response could not be parsed",
             )
 
-        all_errors: list[str] = []
-        validated_files: list[GeneratedFile] = []
-
-        for file in files:
-            if file.path.endswith(".py"):
-                validation = self._formatter.validate_all(file.content, file.path)
-                if validation.black_result.formatted_code:
-                    file = GeneratedFile(
-                        path=file.path,
-                        content=validation.black_result.formatted_code,
-                    )
-                all_errors.extend(validation.all_errors)
-            validated_files.append(file)
+        # Parallel validation
+        validated_files, all_errors = self._validate_files_parallel(files)
 
         if all_errors:
             logger.warning(f"Validation errors found: {len(all_errors)}")
@@ -790,12 +835,32 @@ Generated by Code Agent
         Returns:
             Formatted string of file contents.
         """
-        file_contents: list[str] = []
+        file_contents: dict[str, str] = {}
+
+        # Parallel fetch all changed files
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_path = {
+                executor.submit(
+                    self._github.get_file_content, path, pr.head_branch
+                ): path
+                for path in pr.changed_files
+            }
+            for future in as_completed(future_to_path):
+                path = future_to_path[future]
+                try:
+                    content = future.result()
+                    if content:
+                        file_contents[path] = content
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {path}: {e}")
+
+        # Build result in original order
+        result: list[str] = []
         for file_path in pr.changed_files:
-            content = self._github.get_file_content(file_path, ref=pr.head_branch)
-            if content:
-                file_contents.append(f"### {file_path}\n```python\n{content}\n```")
-        return "\n\n".join(file_contents)
+            if file_path in file_contents:
+                result.append(f"### {file_path}\n```python\n{file_contents[file_path]}\n```")
+
+        return "\n\n".join(result)
 
 
 def main() -> None:
