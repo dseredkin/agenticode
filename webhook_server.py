@@ -310,6 +310,11 @@ def handle_issue_event(payload: dict, delivery_id: str):
         f"(installation={installation_id}, repo={repository})"
     )
 
+    # Only process webhooks from the contributor app to avoid duplicates
+    if not is_contributor_app_webhook(installation_id, repository):
+        logger.info(f"[{delivery_id}] Ignoring issue webhook from non-contributor app")
+        return jsonify({"status": "ignored", "reason": "not contributor app"})
+
     if action not in ["opened", "labeled"]:
         return jsonify({"status": "ignored", "reason": f"action={action}"})
 
