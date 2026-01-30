@@ -390,6 +390,15 @@ class GitHubClient:
                 if check.conclusion and check.conclusion not in ("success", "skipped"):
                     failed_checks.append(check.name)
 
+            # No CI configured - return success immediately
+            if not check_runs and combined_status.total_count == 0:
+                logger.info("No CI checks configured, skipping CI wait")
+                return CIStatus(
+                    state="success",
+                    checks={},
+                    failed_checks=[],
+                )
+
             all_complete = (
                 all(c.conclusion is not None for c in check_runs)
                 if check_runs
