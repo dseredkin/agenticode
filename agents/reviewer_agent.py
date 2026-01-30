@@ -88,6 +88,7 @@ class ReviewerAgent:
                 reviewer_app_key = reviewer_app_key_env
             else:
                 from agents.utils.github_app import load_private_key
+
                 reviewer_app_key = load_private_key(reviewer_app_key_env)
 
         if github_client:
@@ -352,7 +353,7 @@ class ReviewerAgent:
             # Can't request changes on own PR - fall back to COMMENT
             if "own pull request" in str(e).lower() and event == "REQUEST_CHANGES":
                 logger.warning(
-                    f"Cannot request changes on own PR, posting as COMMENT instead"
+                    "Cannot request changes on own PR, posting as COMMENT instead"
                 )
                 self._github.post_review(
                     pr_number, body, "COMMENT", review_comments or None
