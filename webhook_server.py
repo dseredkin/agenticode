@@ -107,9 +107,11 @@ def webhook():
 
 
 def handle_issue_event(payload: dict, delivery_id: str):
-    """Handle issue events - triggers Code Agent to create PR.
+    """Handle issue events.
 
-    Flow: Issue with 'auto-generate' label -> Code Agent creates PR
+    Flow:
+    - Issue with 'auto-generate' label -> Code Agent creates PR
+    - New issue without 'auto-generate' -> Issue Moderator classifies and responds
     """
     action = payload.get("action", "")
     issue = payload.get("issue", {})
@@ -122,6 +124,7 @@ def handle_issue_event(payload: dict, delivery_id: str):
 
     labels = [label.get("name", "") for label in issue.get("labels", [])]
 
+    # If auto-generate label, trigger Code Agent
     if "auto-generate" in labels:
         command = [
             sys.executable,
@@ -138,7 +141,24 @@ def handle_issue_event(payload: dict, delivery_id: str):
         thread.start()
         return jsonify({"status": "processing", "agent": "code_agent"})
 
-    return jsonify({"status": "ignored", "reason": "no auto-generate label"})
+    # For new issues without auto-generate, run Issue Moderator
+    if action == "opened":
+        command = [
+            sys.executable,
+            "-m",
+            "agents.issue_moderator",
+            "--issue",
+            str(issue_number),
+            "--output-json",
+        ]
+        thread = Thread(
+            target=run_agent,
+            args=(command, "issue_moderator", delivery_id),
+        )
+        thread.start()
+        return jsonify({"status": "processing", "agent": "issue_moderator"})
+
+    return jsonify({"status": "ignored", "reason": "no matching trigger"})
 
 
 def handle_pr_event(payload: dict, delivery_id: str):
@@ -245,10 +265,36 @@ def get_iteration_from_labels(labels: list[str]) -> int:
     return 0
 
 
-@app.route("/trigger/issue/<int:issue_number>", methods=["POST"])
-def trigger_issue(issue_number: int):
-    """Manually trigger Code Agent for an issue."""
-    delivery_id = f"manual-issue-{issue_number}"
+@app.route("/trigger/issue/<int:issue_number>/moderate", methods=["POST"])
+def trigger_issue_moderate(issue_number: int):
+    """Manually trigger Issue Moderator to classify an issue."""
+    delivery_id = f"manual-moderate-{issue_number}"
+    command = [
+        sys.executable,
+        "-m",
+        "agents.issue_moderator",
+        "--issue",
+        str(issue_number),
+        "--output-json",
+    ]
+    thread = Thread(
+        target=run_agent,
+        args=(command, "issue_moderator", delivery_id),
+    )
+    thread.start()
+    return jsonify(
+        {
+            "status": "processing",
+            "agent": "issue_moderator",
+            "issue": issue_number,
+        }
+    )
+
+
+@app.route("/trigger/issue/<int:issue_number>/generate", methods=["POST"])
+def trigger_issue_generate(issue_number: int):
+    """Manually trigger Code Agent to generate code from an issue."""
+    delivery_id = f"manual-generate-{issue_number}"
     command = [
         sys.executable,
         "-m",
@@ -327,14 +373,16 @@ if __name__ == "__main__":
     port = int(os.environ.get("WEBHOOK_PORT", "8000"))
     logger.info(f"Starting webhook server on port {port}")
     logger.info("Event-driven flow:")
+    logger.info("  Issue (opened) -> Issue Moderator classifies & responds")
     logger.info("  Issue (auto-generate) -> Code Agent creates PR")
     logger.info("  PR (opened/sync) -> Reviewer Agent reviews")
     logger.info("  Review (changes_requested) -> Code Agent iterates")
     logger.info("")
     logger.info("Endpoints:")
     logger.info("  POST /webhook - GitHub webhook receiver")
-    logger.info("  POST /trigger/issue/<n> - Manual: Code Agent from issue")
-    logger.info("  POST /trigger/pr/<n>/review - Manual: Reviewer Agent")
-    logger.info("  POST /trigger/pr/<n>/iterate - Manual: Code Agent iterate")
+    logger.info("  POST /trigger/issue/<n>/moderate - Issue Moderator")
+    logger.info("  POST /trigger/issue/<n>/generate - Code Agent from issue")
+    logger.info("  POST /trigger/pr/<n>/review - Reviewer Agent")
+    logger.info("  POST /trigger/pr/<n>/iterate - Code Agent iterate")
     logger.info("  GET  /health - Health check")
     app.run(host="0.0.0.0", port=port, debug=False)

@@ -71,6 +71,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
 "webhook_server.py" = ["S104", "S603"]
+"agents/issue_moderator.py" = ["E501"]  # Long lines in template strings
 
 [tool.mypy]
 python_version = "3.11"
