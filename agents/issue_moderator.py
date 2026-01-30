@@ -52,13 +52,14 @@ RESPONSE_TEMPLATES = {
 - A minimal code example, if possible
 
 This will help us determine the priority and fix it faster.""",
-    "suggestion": """Hello! Thank you for your suggestion. Please describe your idea in more detail:
+    "suggestion": """Hello! Thank you for your suggestion. This idea needs discussion before we can proceed.
 
+Please describe your idea in more detail:
 - What problem does it solve?
 - How do you imagine the desired behavior?
 - Are there similar implementations in other projects?
 
-Your input helps us make this project better.""",
+Your input helps us make this project better. A maintainer will review and discuss this with you.""",
     "question": """Hi there! Thanks for your question. Please describe what's confusing or not working as expected. Include a short code example, what you expected to happen, and what actually occurs.
 
 We'll do our best to clarify things, and if it's a common issue, we may improve the documentation too.""",
@@ -246,13 +247,15 @@ Respond with JSON only."""
             severity: The severity level.
 
         Returns:
-            List of label names.
+            List of label names. Empty for suggestions (needs discussion first).
         """
+        if issue_type == "suggestion":
+            return []
+
         labels = []
 
         type_labels = {
             "bug": "bug",
-            "suggestion": "enhancement",
             "question": "question",
             "documentation": "documentation",
             "unknown": "needs-triage",
