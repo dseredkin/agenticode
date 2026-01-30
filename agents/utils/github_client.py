@@ -256,6 +256,7 @@ class GitHubClient:
         """
         if base_branch is None:
             base_branch = self._repo.default_branch
+        logger.info(f"Creating branch '{branch_name}' from '{base_branch}'")
         base_ref = self._repo.get_git_ref(f"heads/{base_branch}")
         ref_name = f"refs/heads/{branch_name}"
 

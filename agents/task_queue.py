@@ -148,30 +148,45 @@ def run_issue_moderator(
     Returns:
         Result dictionary with success status and classification.
     """
+    import time
+
     from agents.issue_moderator import IssueModerator
 
     logger.info(
-        f"[Queue] Running issue moderator for issue #{issue_number} "
+        f"[Queue] Starting issue moderator for issue #{issue_number} "
         f"(installation={installation_id}, repo={repository})"
     )
+    start_time = time.time()
 
     try:
+        logger.info(f"[Queue] Initializing IssueModerator for #{issue_number}")
         moderator = IssueModerator(
             installation_id=installation_id,
             repository=repository,
         )
+        logger.info(f"[Queue] Running moderation for #{issue_number}")
         result = moderator.run(issue_number)
+        elapsed = time.time() - start_time
+        logger.info(f"[Queue] Moderation completed in {elapsed:.1f}s")
 
         if result.success and result.classification:
             issue_type = result.classification.issue_type
             logger.info(
-                f"[Queue] Issue #{issue_number} classified as {issue_type}, "
+                f"[Queue] Issue #{issue_number} classified as '{issue_type}', "
                 "triggering code generation"
             )
             run_code_agent_issue(
                 issue_number,
                 installation_id=installation_id,
                 repository=repository,
+            )
+        elif result.success:
+            logger.info(
+                f"[Queue] Issue #{issue_number} moderation succeeded (no action)"
+            )
+        else:
+            logger.warning(
+                f"[Queue] Issue #{issue_number} moderation failed: {result.error}"
             )
 
         return {
@@ -189,7 +204,11 @@ def run_issue_moderator(
             ),
         }
     except Exception as e:
-        logger.error(f"[Queue] Issue moderator failed for #{issue_number}: {e}")
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[Queue] Issue moderator failed for #{issue_number} after {elapsed:.1f}s: {e}",
+            exc_info=True,
+        )
         return {
             "success": False,
             "issue_number": issue_number,
@@ -214,19 +233,37 @@ def run_code_agent_issue(
     Returns:
         Result dictionary with success status and PR number.
     """
+    import time
+
     from agents.code_agent import CodeAgent
 
     logger.info(
-        f"[Queue] Running code agent for issue #{issue_number} "
+        f"[Queue] Starting code agent for issue #{issue_number} "
         f"(installation={installation_id}, repo={repository})"
     )
+    start_time = time.time()
 
     try:
+        logger.info(f"[Queue] Initializing CodeAgent for #{issue_number}")
         agent = CodeAgent(
             installation_id=installation_id,
             repository=repository,
         )
+        logger.info(f"[Queue] Running code generation for #{issue_number}")
         result = agent.run(issue_number)
+        elapsed = time.time() - start_time
+
+        if result.success:
+            logger.info(
+                f"[Queue] Code generation succeeded for #{issue_number} in {elapsed:.1f}s: "
+                f"PR #{result.pr_number}, {len(result.iterations)} iterations, "
+                f"{len(result.final_files)} files"
+            )
+        else:
+            logger.warning(
+                f"[Queue] Code generation failed for #{issue_number} after {elapsed:.1f}s: "
+                f"{result.error}"
+            )
 
         return {
             "success": result.success,
@@ -237,7 +274,11 @@ def run_code_agent_issue(
             "files": [f.path for f in result.final_files],
         }
     except Exception as e:
-        logger.error(f"[Queue] Code agent failed for issue #{issue_number}: {e}")
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[Queue] Code agent failed for issue #{issue_number} after {elapsed:.1f}s: {e}",
+            exc_info=True,
+        )
         return {
             "success": False,
             "issue_number": issue_number,

@@ -198,10 +198,12 @@ class CodeAgent:
                 break
 
             elapsed = time.time() - start_time
+            logger.info(f"Iteration {iteration} completed in {elapsed:.1f}s")
             if elapsed > self._iteration_timeout:
                 logger.warning(f"Iteration took {elapsed:.1f}s, approaching timeout")
 
         if not iterations or not iterations[-1].success:
+            logger.error("Code generation failed after all iterations")
             return GenerationResult(
                 success=False,
                 iterations=iterations,
@@ -210,7 +212,9 @@ class CodeAgent:
             )
 
         try:
+            logger.info("Creating pull request...")
             pr_number = self._create_pr(issue, current_files)
+            logger.info(f"Successfully created PR #{pr_number}")
             return GenerationResult(
                 success=True,
                 iterations=iterations,
@@ -218,7 +222,7 @@ class CodeAgent:
                 pr_number=pr_number,
             )
         except Exception as e:
-            logger.error(f"Failed to create PR: {e}")
+            logger.error(f"Failed to create PR: {e}", exc_info=True)
             return GenerationResult(
                 success=False,
                 iterations=iterations,
@@ -249,6 +253,7 @@ class CodeAgent:
             IterationResult with the iteration outcome.
         """
         if previous_errors and previous_files:
+            logger.info("Building iteration prompt with previous errors...")
             previous_code = "\n\n".join(
                 f"# {f.path}\n{f.content}" for f in previous_files
             )
@@ -259,6 +264,7 @@ class CodeAgent:
                 validation_errors=previous_errors,
             )
         else:
+            logger.info("Building initial code generation prompt...")
             prompt = format_code_generation_prompt(
                 issue_title=issue.title,
                 issue_body=issue.body,
@@ -266,10 +272,15 @@ class CodeAgent:
                 existing_code=existing_code,
             )
 
+        logger.info(f"Prompt length: {len(prompt)} chars")
+        logger.info("Calling LLM for code generation...")
+        llm_start = time.time()
         response = self._llm.generate_code(
             prompt=prompt,
             system_prompt=CODE_GENERATION_SYSTEM_PROMPT,
         )
+        llm_elapsed = time.time() - llm_start
+        logger.info(f"LLM response received in {llm_elapsed:.1f}s")
 
         files = self._parse_code_response(response)
         if not files:

@@ -139,18 +139,29 @@ class ReviewerAgent:
                 error=f"Failed to fetch PR: {e}",
             )
 
+        logger.info("Looking for linked issue in PR body...")
         issue = self._get_linked_issue(pr)
+        if issue:
+            logger.info(f"Found linked issue #{issue.number}: {issue.title}")
+        else:
+            logger.info("No linked issue found")
 
         if wait_for_ci:
             logger.info("Waiting for CI to complete...")
             ci_status = self._github.get_ci_status(pr_number)
+            logger.info(f"CI status: {ci_status.state}")
+            if ci_status.failed_checks:
+                logger.warning(f"Failed CI checks: {ci_status.failed_checks}")
         else:
+            logger.info("Skipping CI wait")
             ci_status = CIStatus(state="unknown", checks={}, failed_checks=[])
 
         try:
+            logger.info("Analyzing PR with LLM...")
             decision = self._analyze_pr(pr, issue, ci_status)
+            logger.info(f"Review decision: {decision.status}")
         except Exception as e:
-            logger.error(f"Failed to analyze PR: {e}")
+            logger.error(f"Failed to analyze PR: {e}", exc_info=True)
             return ReviewResult(
                 success=False,
                 decision=None,
@@ -158,9 +169,11 @@ class ReviewerAgent:
             )
 
         try:
+            logger.info("Posting review to GitHub...")
             self._post_review(pr_number, decision)
+            logger.info("Review posted successfully")
         except Exception as e:
-            logger.error(f"Failed to post review: {e}")
+            logger.error(f"Failed to post review: {e}", exc_info=True)
             return ReviewResult(
                 success=False,
                 decision=decision,

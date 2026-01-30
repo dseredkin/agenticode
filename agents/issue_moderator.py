@@ -164,6 +164,7 @@ class IssueModerator:
                 error=f"Failed to fetch issue: {e}",
             )
 
+        logger.info("Checking if issue was already moderated...")
         if self._is_already_moderated(issue_number):
             logger.info(f"Issue #{issue_number} already moderated, skipping")
             return ModerationResult(
@@ -172,9 +173,14 @@ class IssueModerator:
             )
 
         try:
+            logger.info("Classifying issue with LLM...")
             classification = self._classify_issue(issue.title, issue.body)
+            logger.info(
+                f"Classification: type={classification.issue_type}, "
+                f"severity={classification.severity}, labels={classification.labels}"
+            )
         except Exception as e:
-            logger.error(f"Failed to classify issue: {e}")
+            logger.error(f"Failed to classify issue: {e}", exc_info=True)
             return ModerationResult(
                 success=False,
                 issue_number=issue_number,
@@ -182,9 +188,11 @@ class IssueModerator:
             )
 
         try:
+            logger.info("Posting moderation response to GitHub...")
             self._post_response(issue_number, classification)
+            logger.info("Response posted successfully")
         except Exception as e:
-            logger.error(f"Failed to post response: {e}")
+            logger.error(f"Failed to post response: {e}", exc_info=True)
             return ModerationResult(
                 success=False,
                 issue_number=issue_number,
