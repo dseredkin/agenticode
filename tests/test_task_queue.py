@@ -110,7 +110,7 @@ class TestTaskFunctions:
             success=True,
             pr_number=55,
             error=None,
-            decision=MagicMock(value="approve"),
+            decision=MagicMock(status="approve"),
         )
         mock_agent_class.return_value = mock_agent
 

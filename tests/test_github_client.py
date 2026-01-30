@@ -103,21 +103,35 @@ class TestGitHubClient:
         github_client._repo.create_git_ref.assert_called_once()
 
     def test_commit_files_create_new(self, github_client):
-        """Test committing new files."""
-        from github import GithubException
-
-        github_client._repo.get_contents.side_effect = GithubException(
-            404, {}, None
-        )
-
+        """Test committing new files using Git Data API."""
         mock_ref = MagicMock()
         mock_ref.object.sha = "abc123"
         github_client._repo.get_git_ref.return_value = mock_ref
 
-        files = [FileChange(path="new.py", content="print('new')")]
-        github_client.commit_files(files, "Add new file", "main")
+        mock_commit = MagicMock()
+        mock_commit.tree = MagicMock()
+        github_client._repo.get_git_commit.return_value = mock_commit
 
-        github_client._repo.create_file.assert_called_once()
+        mock_blob = MagicMock()
+        mock_blob.sha = "blob123"
+        github_client._repo.create_git_blob.return_value = mock_blob
+
+        mock_tree = MagicMock()
+        mock_tree.sha = "tree123"
+        github_client._repo.create_git_tree.return_value = mock_tree
+
+        mock_new_commit = MagicMock()
+        mock_new_commit.sha = "newcommit123"
+        github_client._repo.create_git_commit.return_value = mock_new_commit
+
+        files = [FileChange(path="new.py", content="print('new')")]
+        result = github_client.commit_files(files, "Add new file", "main")
+
+        assert result == "newcommit123"
+        github_client._repo.create_git_blob.assert_called_once()
+        github_client._repo.create_git_tree.assert_called_once()
+        github_client._repo.create_git_commit.assert_called_once()
+        mock_ref.edit.assert_called_once_with("newcommit123")
 
     def test_create_pr(self, github_client):
         """Test creating a pull request."""
