@@ -48,7 +48,7 @@ def post_fork(server, worker):
         # Got the lock - this worker starts the consumer
         from agents.task_queue import start_consumer_thread
 
-        num_workers = int(os.environ.get("QUEUE_WORKERS", "48"))
+        num_workers = int(os.environ.get("QUEUE_WORKERS", "12"))
         start_consumer_thread(workers=num_workers)
         _consumer_worker_pid = worker.pid
         server.log.info(f"Huey consumer started in worker {worker.pid}")
