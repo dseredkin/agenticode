@@ -13,9 +13,11 @@ ENV UV_SYSTEM_PYTHON=1
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-COPY pyproject.toml .
+COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev
 
 COPY . .
 
-CMD ["uv", "run", "python", "-m", "agents.code_agent"]
+EXPOSE 8000
+
+CMD ["uv", "run", "gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "600", "webhook_server:app"]

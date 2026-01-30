@@ -2,7 +2,6 @@
 
 import hashlib
 import hmac
-import json
 import logging
 import os
 import subprocess
@@ -41,11 +40,14 @@ def verify_signature(payload: bytes, signature: str) -> bool:
     if not signature:
         return False
 
-    expected = "sha256=" + hmac.new(
-        WEBHOOK_SECRET.encode(),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            WEBHOOK_SECRET.encode(),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+    )
 
     return hmac.compare_digest(expected, signature)
 
@@ -133,15 +135,22 @@ def handle_issue_event(payload: dict, delivery_id: str):
 
     labels = [label.get("name", "") for label in issue.get("labels", [])]
 
-    if action == "opened" or "auto-generate" in labels:
+    if "auto-generate" in labels:
+        # Use orchestrator for full loop: issue -> PR -> review -> iterate
         command = [
-            sys.executable, "-m", "agents.code_agent",
-            "--issue", str(issue_number),
+            sys.executable,
+            "-m",
+            "agents.interaction_orchestrator",
+            "--issue",
+            str(issue_number),
             "--output-json",
         ]
-        thread = Thread(target=run_agent, args=(command, "code_agent", delivery_id))
+        thread = Thread(
+            target=run_agent,
+            args=(command, "interaction_orchestrator", delivery_id),
+        )
         thread.start()
-        return jsonify({"status": "processing", "agent": "code_agent"})
+        return jsonify({"status": "processing", "agent": "interaction_orchestrator"})
 
     return jsonify({"status": "ignored", "reason": "no matching trigger"})
 
@@ -168,71 +177,82 @@ def handle_pr_event(payload: dict, delivery_id: str):
     if not (title.startswith("feat:") or "auto-review" in labels):
         return jsonify({"status": "ignored", "reason": "no auto-review trigger"})
 
+    # Use orchestrator for full review loop
     command = [
-        sys.executable, "-m", "agents.reviewer_agent",
-        "--pr", str(pr_number),
-        "--no-wait-ci",
+        sys.executable,
+        "-m",
+        "agents.interaction_orchestrator",
+        "--pr",
+        str(pr_number),
         "--output-json",
     ]
-    thread = Thread(target=run_agent, args=(command, "reviewer_agent", delivery_id))
+    thread = Thread(
+        target=run_agent,
+        args=(command, "interaction_orchestrator", delivery_id),
+    )
     thread.start()
 
-    return jsonify({"status": "processing", "agent": "reviewer_agent"})
+    return jsonify({"status": "processing", "agent": "interaction_orchestrator"})
 
 
 @app.route("/trigger/issue/<int:issue_number>", methods=["POST"])
 def trigger_issue(issue_number: int):
-    """Manually trigger code agent for an issue.
+    """Manually trigger full orchestration for an issue.
 
     Args:
         issue_number: GitHub issue number.
     """
     delivery_id = f"manual-issue-{issue_number}"
     command = [
-        sys.executable, "-m", "agents.code_agent",
-        "--issue", str(issue_number),
+        sys.executable,
+        "-m",
+        "agents.interaction_orchestrator",
+        "--issue",
+        str(issue_number),
         "--output-json",
     ]
-    thread = Thread(target=run_agent, args=(command, "code_agent", delivery_id))
+    thread = Thread(
+        target=run_agent,
+        args=(command, "interaction_orchestrator", delivery_id),
+    )
     thread.start()
-    return jsonify({"status": "processing", "agent": "code_agent", "issue": issue_number})
+    return jsonify(
+        {
+            "status": "processing",
+            "agent": "interaction_orchestrator",
+            "issue": issue_number,
+        }
+    )
 
 
 @app.route("/trigger/pr/<int:pr_number>", methods=["POST"])
-def trigger_pr_review(pr_number: int):
-    """Manually trigger reviewer agent for a PR.
+def trigger_pr_orchestration(pr_number: int):
+    """Manually trigger full orchestration for a PR.
 
     Args:
         pr_number: GitHub PR number.
     """
     delivery_id = f"manual-pr-{pr_number}"
     command = [
-        sys.executable, "-m", "agents.reviewer_agent",
-        "--pr", str(pr_number),
-        "--no-wait-ci",
+        sys.executable,
+        "-m",
+        "agents.interaction_orchestrator",
+        "--pr",
+        str(pr_number),
         "--output-json",
     ]
-    thread = Thread(target=run_agent, args=(command, "reviewer_agent", delivery_id))
+    thread = Thread(
+        target=run_agent,
+        args=(command, "interaction_orchestrator", delivery_id),
+    )
     thread.start()
-    return jsonify({"status": "processing", "agent": "reviewer_agent", "pr": pr_number})
-
-
-@app.route("/trigger/pr/<int:pr_number>/iterate", methods=["POST"])
-def trigger_pr_iteration(pr_number: int):
-    """Manually trigger code agent iteration for a PR.
-
-    Args:
-        pr_number: GitHub PR number.
-    """
-    delivery_id = f"manual-iterate-{pr_number}"
-    command = [
-        sys.executable, "-m", "agents.code_agent",
-        "--pr", str(pr_number),
-        "--output-json",
-    ]
-    thread = Thread(target=run_agent, args=(command, "code_agent", delivery_id))
-    thread.start()
-    return jsonify({"status": "processing", "agent": "code_agent", "pr": pr_number})
+    return jsonify(
+        {
+            "status": "processing",
+            "agent": "interaction_orchestrator",
+            "pr": pr_number,
+        }
+    )
 
 
 if __name__ == "__main__":
@@ -240,8 +260,7 @@ if __name__ == "__main__":
     logger.info(f"Starting webhook server on port {port}")
     logger.info("Endpoints:")
     logger.info("  POST /webhook - GitHub webhook receiver")
-    logger.info("  POST /trigger/issue/<number> - Manual issue trigger")
-    logger.info("  POST /trigger/pr/<number> - Manual PR review trigger")
-    logger.info("  POST /trigger/pr/<number>/iterate - Manual PR iteration trigger")
+    logger.info("  POST /trigger/issue/<number> - Manual orchestration from issue")
+    logger.info("  POST /trigger/pr/<number> - Manual orchestration from PR")
     logger.info("  GET  /health - Health check")
     app.run(host="0.0.0.0", port=port, debug=False)

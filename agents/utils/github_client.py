@@ -466,6 +466,17 @@ class GitHubClient:
         issue = self._repo.get_issue(pr_number)
         return [label.name for label in issue.labels]
 
+    def post_comment(self, issue_or_pr_number: int, body: str) -> None:
+        """Post a comment on an issue or PR.
+
+        Args:
+            issue_or_pr_number: The issue or PR number.
+            body: Comment body text.
+        """
+        issue = self._repo.get_issue(issue_or_pr_number)
+        issue.create_comment(body)
+        logger.info(f"Posted comment on #{issue_or_pr_number}")
+
     def remove_label(self, issue_or_pr_number: int, label: str) -> None:
         """Remove a label from an issue or PR.
 

@@ -4,10 +4,38 @@ GitHub-Native SDLC Automation System that automates the software development lif
 
 ## Features
 
-- **Code Agent**: CLI tool that reads GitHub issues and generates PRs with code
+- **Code Agent**: Reads GitHub issues and generates PRs with code
 - **Reviewer Agent**: Reviews PRs and approves/requests changes
-- **Iteration Loop**: Automatic re-generation based on review feedback (max 5 iterations)
+- **Interaction Orchestrator**: Full automation loop (issue -> PR -> review -> iterate)
+- **Webhook Server**: Deployable server for real-time GitHub event handling
 - **Multi-Provider LLM Support**: OpenAI, Grok (xAI), YandexGPT
+
+## How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────────┐
+│ GitHub Issue│────>│ Code Agent  │────>│ Creates PR with generated code  │
+│ (auto-generate)   │             │     │                                 │
+└─────────────┘     └─────────────┘     └────────────────┬────────────────┘
+                                                         │
+                    ┌─────────────────────────────────────┘
+                    v
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Review Loop (Orchestrator)                        │
+│  ┌──────────────┐    ┌─────────────────┐    ┌──────────────────────┐   │
+│  │Reviewer Agent│───>│ APPROVE?        │───>│ Done (PR approved)   │   │
+│  │ reviews PR   │    │                 │    └──────────────────────┘   │
+│  └──────────────┘    │ REQUEST_CHANGES │                               │
+│                      └────────┬────────┘                               │
+│                               │                                         │
+│                               v                                         │
+│                      ┌─────────────────┐                               │
+│                      │ Code Agent      │──── Loop until approved       │
+│                      │ iterates on     │     or max rounds reached     │
+│                      │ feedback        │                               │
+│                      └─────────────────┘                               │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Installation
 
@@ -32,71 +60,133 @@ Copy `.env.example` to `.env` and configure:
 cp .env.example .env
 ```
 
-Required environment variables:
-
 | Variable | Description |
 |----------|-------------|
-| `GITHUB_TOKEN` | GitHub PAT with repo access |
+| `GITHUB_TOKEN` | GitHub PAT with repo access (fallback) |
+| `CODE_AGENT_TOKEN` | PAT for Code Agent (creates branches, PRs) |
+| `REVIEWER_AGENT_TOKEN` | PAT for Reviewer Agent (reviews, approves) |
 | `GITHUB_REPOSITORY` | Repository in owner/repo format |
 | `LLM_PROVIDER` | Provider: `openai`, `grok`, `yandex` |
 | `LLM_MODEL` | Model to use (provider-specific) |
 | `OPENAI_API_KEY` | OpenAI API key (if using openai) |
-| `GROK_API_KEY` | Grok/xAI API key (if using grok) |
-| `YANDEX_API_KEY` | YandexGPT API key (if using yandex) |
+| `MAX_ITERATIONS` | Max code generation attempts (default: 5) |
+| `MAX_REVIEW_ROUNDS` | Max review-fix cycles (default: 3) |
+| `WEBHOOK_SECRET` | GitHub webhook secret (optional) |
 
 ## Usage
 
-### Code Agent
+### Interaction Orchestrator (Recommended)
 
-Generate code from a GitHub issue:
+Run the full automation loop from an issue or PR:
 
 ```bash
-uv run python -m agents.code_agent --issue 123
+# From issue: creates PR + runs review loop
+uv run python -m agents.interaction_orchestrator --issue 123
+
+# From existing PR: continues review loop
+uv run python -m agents.interaction_orchestrator --pr 456
+
+# Options
+--max-review-rounds 5    # Maximum review-fix cycles
+--output-json            # Output result as JSON
 ```
 
-Options:
-- `--max-iterations`: Maximum number of generation attempts (default: 5)
-- `--output-json`: Output result as JSON
-
-### Reviewer Agent
-
-Review a pull request:
+### Individual Agents
 
 ```bash
+# Code Agent - generate code from issue
+uv run python -m agents.code_agent --issue 123
+
+# Code Agent - iterate on PR based on review feedback
+uv run python -m agents.code_agent --pr 456
+
+# Reviewer Agent - review a PR
 uv run python -m agents.reviewer_agent --pr 456
 ```
 
-Options:
-- `--no-wait-ci`: Don't wait for CI to complete
-- `--output-json`: Output result as JSON
+### Webhook Server (Local)
+
+Run the webhook server locally for development:
+
+```bash
+uv run python webhook_server.py
+```
+
+Endpoints:
+- `POST /webhook` - GitHub webhook receiver
+- `POST /trigger/issue/<number>` - Manual orchestration from issue
+- `POST /trigger/pr/<number>` - Manual orchestration from PR
+- `GET /health` - Health check
 
 ### Docker
 
 ```bash
-# Run Code Agent
-ISSUE_NUMBER=123 docker-compose run code-agent
+# Run webhook server
+docker-compose up webhook-server
 
-# Run Reviewer Agent
+# Run orchestrator for an issue
+ISSUE_NUMBER=123 docker-compose run orchestrator
+
+# Run individual agents
+ISSUE_NUMBER=123 docker-compose run code-agent
 PR_NUMBER=456 docker-compose run reviewer-agent
+```
+
+## Deployment
+
+### DigitalOcean App Platform
+
+1. Push code to GitHub
+
+2. Create app via [DigitalOcean Console](https://cloud.digitalocean.com/apps):
+   - Click **Create App** -> Select your GitHub repo
+   - It will auto-detect the Dockerfile
+
+3. Add environment variables in **Settings**:
+   - `GITHUB_TOKEN` (secret)
+   - `GITHUB_REPOSITORY` (e.g., `yourname/yourrepo`)
+   - `OPENAI_API_KEY` (secret)
+   - `WEBHOOK_SECRET` (secret, optional)
+
+4. Configure GitHub webhook:
+   - Go to your repo -> **Settings** -> **Webhooks** -> **Add webhook**
+   - **Payload URL**: `https://your-app-url.ondigitalocean.app/webhook`
+   - **Content type**: `application/json`
+   - **Secret**: Same as `WEBHOOK_SECRET`
+   - **Events**: Select `Issues` and `Pull requests`
+
+### Using doctl CLI
+
+```bash
+# Install and authenticate
+brew install doctl
+doctl auth init
+
+# Edit .do/app.yaml with your repo
+# Then create the app
+doctl apps create --spec .do/app.yaml
 ```
 
 ## GitHub Actions
 
-The system includes three workflows:
+The system includes workflows for CI/CD integration:
 
 1. **CI** (`ci.yaml`): Runs tests, linting, and type checking on push/PR
 2. **Code Generation** (`on-issue.yaml`): Triggers on issues with `auto-generate` label
-3. **PR Review** (`on-pr.yaml`): Reviews PRs with `feat:` prefix or `auto-review` label
+3. **PR Review** (`on-pr.yaml`): Runs orchestrator on PRs with `feat:` prefix or `auto-review` label
 
 ### Setup
 
 1. Add required secrets to your repository:
+   - `CODE_AGENT_TOKEN`
+   - `REVIEWER_AGENT_TOKEN`
    - `OPENAI_API_KEY` (or other provider keys)
 
 2. Optionally configure variables:
    - `LLM_PROVIDER`: Default `openai`
    - `LLM_MODEL`: Default `gpt-4o-mini`
    - `MAX_ITERATIONS`: Default `5`
+   - `MAX_REVIEW_ROUNDS`: Default `3`
 
 ## Development
 
@@ -134,16 +224,22 @@ uv add --dev package-name
 ```
 agenticode/
 ├── agents/
-│   ├── code_agent.py      # Code generation from issues
-│   ├── reviewer_agent.py  # PR review automation
+│   ├── code_agent.py           # Code generation from issues
+│   ├── reviewer_agent.py       # PR review automation
+│   ├── interaction_orchestrator.py  # Full review-fix loop
 │   └── utils/
-│       ├── github_client.py   # GitHub API wrapper
-│       ├── llm_client.py      # Multi-provider LLM client
-│       ├── code_formatter.py  # Black, Ruff, Mypy integration
-│       └── prompts.py         # LLM prompt templates
-├── .github/workflows/     # GitHub Actions
-├── src/                   # Generated application code
-└── tests/                 # Test suite
+│       ├── github_client.py    # GitHub API wrapper
+│       ├── github_app.py       # GitHub App integration
+│       ├── llm_client.py       # Multi-provider LLM client
+│       ├── code_formatter.py   # Black, Ruff, Mypy integration
+│       └── prompts.py          # LLM prompt templates
+├── webhook_server.py           # Flask webhook server
+├── .github/workflows/          # GitHub Actions
+├── .do/app.yaml               # DigitalOcean App Platform config
+├── Dockerfile                  # Container image
+├── docker-compose.yml          # Local development
+├── src/                        # Generated application code
+└── tests/                      # Test suite
 ```
 
 ## License

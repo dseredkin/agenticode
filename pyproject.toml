@@ -12,6 +12,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
     "pyjwt[crypto]>=2.10.1",
+    "flask>=3.0.0",
+    "gunicorn>=21.0.0",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +52,8 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+
+[tool.ruff.lint]
 select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
@@ -64,8 +68,9 @@ ignore = [
     "S101",   # Allow assert in tests
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"webhook_server.py" = ["S104", "S603"]
 
 [tool.mypy]
 python_version = "3.11"

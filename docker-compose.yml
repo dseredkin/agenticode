@@ -1,8 +1,31 @@
 services:
+  webhook-server:
+    build: .
+    ports:
+      - "${WEBHOOK_PORT:-8000}:8000"
+    environment:
+      - GITHUB_TOKEN
+      - CODE_AGENT_TOKEN
+      - REVIEWER_AGENT_TOKEN
+      - GITHUB_REPOSITORY
+      - LLM_PROVIDER
+      - LLM_MODEL
+      - OPENAI_API_KEY
+      - GROK_API_KEY
+      - YANDEX_API_KEY
+      - YANDEX_FOLDER_ID
+      - MAX_ITERATIONS
+      - MAX_REVIEW_ROUNDS
+      - WEBHOOK_SECRET
+      - WEBHOOK_PORT=8000
+    command: uv run python webhook_server.py
+    restart: unless-stopped
+
   code-agent:
     build: .
     environment:
       - GITHUB_TOKEN
+      - CODE_AGENT_TOKEN
       - GITHUB_REPOSITORY
       - LLM_PROVIDER
       - LLM_MODEL
@@ -12,15 +35,13 @@ services:
       - YANDEX_FOLDER_ID
       - MAX_ITERATIONS
       - ITERATION_TIMEOUT
-    volumes:
-      - ./src:/app/src
-      - ./tests:/app/tests
     command: uv run python -m agents.code_agent --issue ${ISSUE_NUMBER:-1}
 
   reviewer-agent:
     build: .
     environment:
       - GITHUB_TOKEN
+      - REVIEWER_AGENT_TOKEN
       - GITHUB_REPOSITORY
       - LLM_PROVIDER
       - LLM_MODEL
@@ -28,7 +49,21 @@ services:
       - GROK_API_KEY
       - YANDEX_API_KEY
       - YANDEX_FOLDER_ID
-    volumes:
-      - ./src:/app/src
-      - ./tests:/app/tests
     command: uv run python -m agents.reviewer_agent --pr ${PR_NUMBER:-1}
+
+  orchestrator:
+    build: .
+    environment:
+      - GITHUB_TOKEN
+      - CODE_AGENT_TOKEN
+      - REVIEWER_AGENT_TOKEN
+      - GITHUB_REPOSITORY
+      - LLM_PROVIDER
+      - LLM_MODEL
+      - OPENAI_API_KEY
+      - GROK_API_KEY
+      - YANDEX_API_KEY
+      - YANDEX_FOLDER_ID
+      - MAX_ITERATIONS
+      - MAX_REVIEW_ROUNDS
+    command: uv run python -m agents.interaction_orchestrator --issue ${ISSUE_NUMBER:-1}
