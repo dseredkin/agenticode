@@ -7,6 +7,8 @@ import os
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from agents.task_queue import (
     QueueConnectionError,
@@ -26,6 +28,59 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Request size limit (1MB max payload)
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1MB
+
+# Rate limiting configuration
+# Default: 60 requests/minute globally, 30/minute per installation
+RATE_LIMIT_GLOBAL = os.environ.get("RATE_LIMIT_GLOBAL", "60/minute")
+RATE_LIMIT_PER_INSTALLATION = os.environ.get("RATE_LIMIT_PER_INSTALLATION", "30/minute")
+
+
+def get_installation_id_for_limit() -> str:
+    """Extract installation ID from request for rate limiting."""
+    try:
+        payload = request.get_json(silent=True)
+        if payload:
+            installation = payload.get("installation", {})
+            installation_id = installation.get("id")
+            if installation_id:
+                return str(installation_id)
+    except Exception:
+        pass
+    # Fall back to IP address
+    return get_remote_address()
+
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[RATE_LIMIT_GLOBAL],
+    storage_uri="memory://",
+)
+
+
+@app.errorhandler(429)
+def rate_limit_exceeded(e):
+    """Handle rate limit exceeded errors."""
+    logger.warning(f"Rate limit exceeded: {e.description}")
+    return jsonify({
+        "error": "Rate limit exceeded",
+        "message": str(e.description),
+        "retry_after": e.description,
+    }), 429
+
+
+@app.errorhandler(413)
+def request_too_large(e):
+    """Handle request entity too large errors."""
+    logger.warning("Request payload too large")
+    return jsonify({
+        "error": "Request too large",
+        "message": "Payload exceeds 1MB limit",
+    }), 413
+
 
 # Start embedded task consumer (no separate worker needed)
 _embed_worker = os.environ.get("ENABLE_EMBEDDED_WORKER", "true").lower()
@@ -150,6 +205,7 @@ def health():
 
 
 @app.route("/webhook", methods=["POST"])
+@limiter.limit(RATE_LIMIT_PER_INSTALLATION, key_func=get_installation_id_for_limit)
 def webhook():
     """Handle GitHub webhook events."""
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -456,6 +512,7 @@ def job_status(job_id: str):
 
 
 @app.route("/trigger/issue/<int:issue_number>/moderate", methods=["POST"])
+@limiter.limit("10/minute")
 def trigger_issue_moderate(issue_number: int):
     """Manually trigger Issue Moderator to classify an issue."""
     try:
@@ -483,6 +540,7 @@ def trigger_issue_moderate(issue_number: int):
 
 
 @app.route("/trigger/issue/<int:issue_number>/generate", methods=["POST"])
+@limiter.limit("10/minute")
 def trigger_issue_generate(issue_number: int):
     """Manually trigger Code Agent to generate code from an issue."""
     try:
@@ -510,6 +568,7 @@ def trigger_issue_generate(issue_number: int):
 
 
 @app.route("/trigger/pr/<int:pr_number>/review", methods=["POST"])
+@limiter.limit("10/minute")
 def trigger_pr_review(pr_number: int):
     """Manually trigger Reviewer Agent for a PR."""
     try:
@@ -537,6 +596,7 @@ def trigger_pr_review(pr_number: int):
 
 
 @app.route("/trigger/pr/<int:pr_number>/iterate", methods=["POST"])
+@limiter.limit("10/minute")
 def trigger_pr_iteration(pr_number: int):
     """Manually trigger Code Agent to iterate on PR feedback."""
     try:
