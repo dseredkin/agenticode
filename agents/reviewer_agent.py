@@ -64,15 +64,24 @@ class ReviewerAgent:
         self,
         github_client: GitHubClient | None = None,
         llm_client: LLMClient | None = None,
+        installation_id: int | None = None,
+        repository: str | None = None,
     ) -> None:
         """Initialize Reviewer Agent.
 
         Args:
             github_client: GitHub client instance.
             llm_client: LLM client instance.
+            installation_id: GitHub App installation ID (for multi-tenant support).
+            repository: Repository in owner/repo format.
         """
         if github_client:
             self._github = github_client
+        elif installation_id:
+            self._github = GitHubClient(
+                installation_id=installation_id,
+                repository=repository,
+            )
         else:
             from agents.utils.github_app import get_app_token_from_env
 
@@ -82,7 +91,7 @@ class ReviewerAgent:
                 token = os.environ.get("REVIEWER_AGENT_TOKEN")
             if not token:
                 token = os.environ.get("GITHUB_TOKEN")
-            self._github = GitHubClient(token=token)
+            self._github = GitHubClient(token=token, repository=repository)
         self._llm = llm_client or LLMClient()
 
     def run(self, pr_number: int, wait_for_ci: bool = True) -> ReviewResult:

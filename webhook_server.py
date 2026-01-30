@@ -15,6 +15,7 @@ from agents.task_queue import (
     TaskQueueManager,
     start_consumer_thread,
 )
+from agents.utils.installation_store import get_installation_store
 
 load_dotenv()
 
@@ -65,6 +66,24 @@ def verify_signature(payload: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+def extract_installation_context(payload: dict) -> tuple[int | None, str | None]:
+    """Extract installation ID and repository from webhook payload.
+
+    Args:
+        payload: GitHub webhook payload.
+
+    Returns:
+        Tuple of (installation_id, repository_full_name).
+    """
+    installation = payload.get("installation", {})
+    installation_id = installation.get("id")
+
+    repository = payload.get("repository", {})
+    repo_full_name = repository.get("full_name")
+
+    return installation_id, repo_full_name
+
+
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint."""
@@ -101,7 +120,11 @@ def webhook():
     logger.info(f"[{delivery_id}] Received event: {event}")
 
     try:
-        if event == "issues":
+        if event == "installation":
+            return handle_installation_event(payload, delivery_id)
+        elif event == "installation_repositories":
+            return handle_installation_repositories_event(payload, delivery_id)
+        elif event == "issues":
             return handle_issue_event(payload, delivery_id)
         elif event == "pull_request":
             return handle_pr_event(payload, delivery_id)
@@ -136,6 +159,105 @@ def webhook():
         }), 500
 
 
+def handle_installation_event(payload: dict, delivery_id: str):
+    """Handle GitHub App installation events.
+
+    Triggered when:
+    - App is installed (created)
+    - App is uninstalled (deleted)
+    - App is suspended/unsuspended
+    """
+    action = payload.get("action", "")
+    installation = payload.get("installation", {})
+    installation_id = installation.get("id")
+    account = installation.get("account", {})
+    account_login = account.get("login", "")
+    account_type = account.get("type", "")
+
+    logger.info(
+        f"[{delivery_id}] Installation {installation_id} ({account_login}): {action}"
+    )
+
+    store = get_installation_store()
+
+    if action == "created":
+        repositories = payload.get("repositories", [])
+        repo_names = [repo.get("full_name") for repo in repositories]
+
+        store.add_installation(
+            installation_id=installation_id,
+            account_login=account_login,
+            account_type=account_type,
+            repositories=repo_names,
+        )
+
+        return jsonify({
+            "status": "created",
+            "installation_id": installation_id,
+            "account": account_login,
+            "repositories": len(repo_names),
+        })
+
+    elif action == "deleted":
+        store.remove_installation(installation_id)
+        return jsonify({
+            "status": "deleted",
+            "installation_id": installation_id,
+        })
+
+    elif action == "suspend":
+        store.suspend_installation(installation_id)
+        return jsonify({
+            "status": "suspended",
+            "installation_id": installation_id,
+        })
+
+    elif action == "unsuspend":
+        store.unsuspend_installation(installation_id)
+        return jsonify({
+            "status": "unsuspended",
+            "installation_id": installation_id,
+        })
+
+    return jsonify({"status": "ignored", "action": action})
+
+
+def handle_installation_repositories_event(payload: dict, delivery_id: str):
+    """Handle repository additions/removals from an installation.
+
+    Triggered when repositories are added to or removed from an installation.
+    """
+    action = payload.get("action", "")
+    installation = payload.get("installation", {})
+    installation_id = installation.get("id")
+
+    logger.info(f"[{delivery_id}] Installation {installation_id} repos: {action}")
+
+    store = get_installation_store()
+
+    if action == "added":
+        repositories = payload.get("repositories_added", [])
+        repo_names = [repo.get("full_name") for repo in repositories]
+        count = store.add_repositories(installation_id, repo_names)
+        return jsonify({
+            "status": "repos_added",
+            "installation_id": installation_id,
+            "count": count,
+        })
+
+    elif action == "removed":
+        repositories = payload.get("repositories_removed", [])
+        repo_names = [repo.get("full_name") for repo in repositories]
+        count = store.remove_repositories(installation_id, repo_names)
+        return jsonify({
+            "status": "repos_removed",
+            "installation_id": installation_id,
+            "count": count,
+        })
+
+    return jsonify({"status": "ignored", "action": action})
+
+
 def handle_issue_event(payload: dict, delivery_id: str):
     """Handle issue events.
 
@@ -147,7 +269,12 @@ def handle_issue_event(payload: dict, delivery_id: str):
     issue = payload.get("issue", {})
     issue_number = issue.get("number")
 
-    logger.info(f"[{delivery_id}] Issue #{issue_number}: {action}")
+    installation_id, repository = extract_installation_context(payload)
+
+    logger.info(
+        f"[{delivery_id}] Issue #{issue_number}: {action} "
+        f"(installation={installation_id}, repo={repository})"
+    )
 
     if action not in ["opened", "labeled"]:
         return jsonify({"status": "ignored", "reason": f"action={action}"})
@@ -156,7 +283,11 @@ def handle_issue_event(payload: dict, delivery_id: str):
     qm = get_queue_manager()
 
     if "auto-generate" in labels:
-        job = qm.enqueue_code_generation(issue_number)
+        job = qm.enqueue_code_generation(
+            issue_number,
+            installation_id=installation_id,
+            repository=repository,
+        )
         if job:
             return jsonify({
                 "status": "queued",
@@ -170,7 +301,11 @@ def handle_issue_event(payload: dict, delivery_id: str):
         })
 
     if action == "opened":
-        job = qm.enqueue_issue_moderate(issue_number)
+        job = qm.enqueue_issue_moderate(
+            issue_number,
+            installation_id=installation_id,
+            repository=repository,
+        )
         if job:
             return jsonify({
                 "status": "queued",
@@ -196,7 +331,12 @@ def handle_pr_event(payload: dict, delivery_id: str):
     pr_number = pr.get("number")
     title = pr.get("title", "")
 
-    logger.info(f"[{delivery_id}] PR #{pr_number}: {action} - {title}")
+    installation_id, repository = extract_installation_context(payload)
+
+    logger.info(
+        f"[{delivery_id}] PR #{pr_number}: {action} - {title} "
+        f"(installation={installation_id}, repo={repository})"
+    )
 
     if action not in ["opened", "synchronize"]:
         return jsonify({"status": "ignored", "reason": f"action={action}"})
@@ -212,7 +352,11 @@ def handle_pr_event(payload: dict, delivery_id: str):
         return jsonify({"status": "ignored", "reason": "max iterations reached"})
 
     qm = get_queue_manager()
-    job = qm.enqueue_pr_review(pr_number)
+    job = qm.enqueue_pr_review(
+        pr_number,
+        installation_id=installation_id,
+        repository=repository,
+    )
 
     if job:
         return jsonify({
@@ -239,7 +383,12 @@ def handle_pr_review_event(payload: dict, delivery_id: str):
     review_state = review.get("state", "")
     reviewer = review.get("user", {}).get("login", "unknown")
 
-    logger.info(f"[{delivery_id}] PR #{pr_number} review by {reviewer}: {review_state}")
+    installation_id, repository = extract_installation_context(payload)
+
+    logger.info(
+        f"[{delivery_id}] PR #{pr_number} review by {reviewer}: {review_state} "
+        f"(installation={installation_id}, repo={repository})"
+    )
 
     if action != "submitted":
         return jsonify({"status": "ignored", "reason": f"action={action}"})
@@ -260,7 +409,11 @@ def handle_pr_review_event(payload: dict, delivery_id: str):
         return jsonify({"status": "ignored", "reason": "max iterations reached"})
 
     qm = get_queue_manager()
-    job = qm.enqueue_pr_iteration(pr_number)
+    job = qm.enqueue_pr_iteration(
+        pr_number,
+        installation_id=installation_id,
+        repository=repository,
+    )
 
     if job:
         return jsonify({

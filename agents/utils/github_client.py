@@ -11,6 +11,8 @@ from github.PullRequest import PullRequest
 from github.Repository import Repository
 from pydantic import BaseModel
 
+from agents.utils.github_app import get_installation_token
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,24 +70,91 @@ class GitHubClient:
         self,
         token: str | None = None,
         repository: str | None = None,
+        installation_id: int | None = None,
     ) -> None:
         """Initialize GitHub client.
 
         Args:
             token: GitHub personal access token. Defaults to GITHUB_TOKEN env var.
             repository: Repository in owner/repo format. Defaults to GITHUB_REPOSITORY env var.
+            installation_id: GitHub App installation ID for installation-based auth.
+                If provided with GitHub App credentials, generates installation token.
         """
-        self._token = token or os.environ.get("GITHUB_TOKEN", "")
+        self._installation_id = installation_id
         self._repository = repository or os.environ.get("GITHUB_REPOSITORY", "")
+
+        if not self._repository:
+            raise ValueError("Repository is required (format: owner/repo)")
+
+        # Try installation-based auth first if installation_id provided
+        if installation_id:
+            self._token = self._get_installation_token(installation_id)
+        else:
+            self._token = token or os.environ.get("GITHUB_TOKEN", "")
 
         if not self._token:
             raise ValueError("GitHub token is required")
-        if not self._repository:
-            raise ValueError("Repository is required (format: owner/repo)")
 
         auth = Auth.Token(self._token)
         self._github = Github(auth=auth)
         self._repo: Repository = self._github.get_repo(self._repository)
+
+    def _get_installation_token(self, installation_id: int) -> str:
+        """Get installation access token for GitHub App.
+
+        Args:
+            installation_id: The installation ID.
+
+        Returns:
+            Installation access token.
+
+        Raises:
+            ValueError: If GitHub App credentials not configured.
+        """
+        app_id = os.environ.get("GITHUB_APP_ID")
+        private_key_env = os.environ.get("GITHUB_APP_PRIVATE_KEY")
+
+        if not app_id or not private_key_env:
+            raise ValueError(
+                "GitHub App credentials required for installation auth "
+                "(GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY)"
+            )
+
+        # Handle key as path or content
+        if private_key_env.startswith("-----BEGIN"):
+            private_key = private_key_env
+        else:
+            from pathlib import Path
+            private_key = Path(private_key_env).read_text()
+
+        return get_installation_token(app_id, private_key, str(installation_id))
+
+    @classmethod
+    def from_installation(
+        cls,
+        installation_id: int,
+        repository: str,
+    ) -> "GitHubClient":
+        """Create a GitHubClient for a specific installation and repository.
+
+        Args:
+            installation_id: GitHub App installation ID.
+            repository: Repository in owner/repo format.
+
+        Returns:
+            GitHubClient instance configured for the installation.
+        """
+        return cls(installation_id=installation_id, repository=repository)
+
+    @property
+    def installation_id(self) -> int | None:
+        """Get the installation ID if using installation-based auth."""
+        return self._installation_id
+
+    @property
+    def repository_name(self) -> str:
+        """Get the repository name in owner/repo format."""
+        return self._repository
 
     @property
     def repo(self) -> Repository:

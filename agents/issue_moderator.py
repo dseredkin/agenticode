@@ -99,18 +99,27 @@ class IssueModerator:
         self,
         github_client: GitHubClient | None = None,
         llm_client: LLMClient | None = None,
+        installation_id: int | None = None,
+        repository: str | None = None,
     ) -> None:
         """Initialize Issue Moderator.
 
         Args:
             github_client: GitHub client instance.
             llm_client: LLM client instance.
+            installation_id: GitHub App installation ID (for multi-tenant support).
+            repository: Repository in owner/repo format.
         """
         if github_client:
             self._github = github_client
+        elif installation_id:
+            self._github = GitHubClient(
+                installation_id=installation_id,
+                repository=repository,
+            )
         else:
             token = os.environ.get("GITHUB_TOKEN")
-            self._github = GitHubClient(token=token)
+            self._github = GitHubClient(token=token, repository=repository)
         self._llm = llm_client or LLMClient()
 
     def run(self, issue_number: int) -> ModerationResult:

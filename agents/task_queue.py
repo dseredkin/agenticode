@@ -125,23 +125,35 @@ def start_consumer_thread(workers: int = 2) -> None:
 
 
 @huey.task(retries=3, retry_delay=60)
-def run_issue_moderator(issue_number: int) -> dict:
+def run_issue_moderator(
+    issue_number: int,
+    installation_id: int | None = None,
+    repository: str | None = None,
+) -> dict:
     """Task: Run issue moderator on an issue.
 
     After classification, automatically triggers code generation for bugs.
 
     Args:
         issue_number: GitHub issue number to moderate.
+        installation_id: GitHub App installation ID (for multi-tenant support).
+        repository: Repository in owner/repo format.
 
     Returns:
         Result dictionary with success status and classification.
     """
     from agents.issue_moderator import IssueModerator
 
-    logger.info(f"[Queue] Running issue moderator for issue #{issue_number}")
+    logger.info(
+        f"[Queue] Running issue moderator for issue #{issue_number} "
+        f"(installation={installation_id}, repo={repository})"
+    )
 
     try:
-        moderator = IssueModerator()
+        moderator = IssueModerator(
+            installation_id=installation_id,
+            repository=repository,
+        )
         result = moderator.run(issue_number)
 
         if result.success and result.classification:
@@ -151,7 +163,11 @@ def run_issue_moderator(issue_number: int) -> dict:
                     f"[Queue] Issue #{issue_number} classified as {issue_type}, "
                     "triggering code generation"
                 )
-                run_code_agent_issue(issue_number)
+                run_code_agent_issue(
+                    issue_number,
+                    installation_id=installation_id,
+                    repository=repository,
+                )
 
         return {
             "success": result.success,
@@ -176,21 +192,33 @@ def run_issue_moderator(issue_number: int) -> dict:
 
 
 @huey.task(retries=3, retry_delay=60)
-def run_code_agent_issue(issue_number: int) -> dict:
+def run_code_agent_issue(
+    issue_number: int,
+    installation_id: int | None = None,
+    repository: str | None = None,
+) -> dict:
     """Task: Run code agent to generate code from an issue.
 
     Args:
         issue_number: GitHub issue number.
+        installation_id: GitHub App installation ID (for multi-tenant support).
+        repository: Repository in owner/repo format.
 
     Returns:
         Result dictionary with success status and PR number.
     """
     from agents.code_agent import CodeAgent
 
-    logger.info(f"[Queue] Running code agent for issue #{issue_number}")
+    logger.info(
+        f"[Queue] Running code agent for issue #{issue_number} "
+        f"(installation={installation_id}, repo={repository})"
+    )
 
     try:
-        agent = CodeAgent()
+        agent = CodeAgent(
+            installation_id=installation_id,
+            repository=repository,
+        )
         result = agent.run(issue_number)
 
         return {
@@ -214,21 +242,33 @@ def run_code_agent_issue(issue_number: int) -> dict:
 
 
 @huey.task(retries=3, retry_delay=60)
-def run_code_agent_pr(pr_number: int) -> dict:
+def run_code_agent_pr(
+    pr_number: int,
+    installation_id: int | None = None,
+    repository: str | None = None,
+) -> dict:
     """Task: Run code agent to iterate on PR feedback.
 
     Args:
         pr_number: GitHub PR number.
+        installation_id: GitHub App installation ID (for multi-tenant support).
+        repository: Repository in owner/repo format.
 
     Returns:
         Result dictionary with success status.
     """
     from agents.code_agent import CodeAgent
 
-    logger.info(f"[Queue] Running code agent iteration for PR #{pr_number}")
+    logger.info(
+        f"[Queue] Running code agent iteration for PR #{pr_number} "
+        f"(installation={installation_id}, repo={repository})"
+    )
 
     try:
-        agent = CodeAgent()
+        agent = CodeAgent(
+            installation_id=installation_id,
+            repository=repository,
+        )
         result = agent.run_pr_iteration(pr_number)
 
         return {
@@ -248,21 +288,33 @@ def run_code_agent_pr(pr_number: int) -> dict:
 
 
 @huey.task(retries=3, retry_delay=60)
-def run_reviewer_agent(pr_number: int) -> dict:
+def run_reviewer_agent(
+    pr_number: int,
+    installation_id: int | None = None,
+    repository: str | None = None,
+) -> dict:
     """Task: Run reviewer agent on a PR.
 
     Args:
         pr_number: GitHub PR number.
+        installation_id: GitHub App installation ID (for multi-tenant support).
+        repository: Repository in owner/repo format.
 
     Returns:
         Result dictionary with review decision.
     """
     from agents.reviewer_agent import ReviewerAgent
 
-    logger.info(f"[Queue] Running reviewer agent for PR #{pr_number}")
+    logger.info(
+        f"[Queue] Running reviewer agent for PR #{pr_number} "
+        f"(installation={installation_id}, repo={repository})"
+    )
 
     try:
-        agent = ReviewerAgent()
+        agent = ReviewerAgent(
+            installation_id=installation_id,
+            repository=repository,
+        )
         result = agent.run(pr_number)
 
         return {
@@ -331,12 +383,16 @@ class TaskQueueManager:
         self,
         issue_number: int,
         deduplicate: bool = True,
+        installation_id: int | None = None,
+        repository: str | None = None,
     ) -> Result[Any] | None:
         """Enqueue issue moderation task.
 
         Args:
             issue_number: GitHub issue number.
             deduplicate: Skip if already queued/processing.
+            installation_id: GitHub App installation ID (for multi-tenant support).
+            repository: Repository in owner/repo format.
 
         Returns:
             Result instance or None if deduplicated.
@@ -352,7 +408,11 @@ class TaskQueueManager:
 
         try:
             self._mark_processing(task_id)
-            result = run_issue_moderator(issue_number)
+            result = run_issue_moderator(
+                issue_number,
+                installation_id=installation_id,
+                repository=repository,
+            )
             logger.info(f"[Queue] Enqueued issue moderation for #{issue_number}")
             return result
 
@@ -365,12 +425,16 @@ class TaskQueueManager:
         self,
         issue_number: int,
         deduplicate: bool = True,
+        installation_id: int | None = None,
+        repository: str | None = None,
     ) -> Result[Any] | None:
         """Enqueue code generation task.
 
         Args:
             issue_number: GitHub issue number.
             deduplicate: Skip if already queued/processing.
+            installation_id: GitHub App installation ID (for multi-tenant support).
+            repository: Repository in owner/repo format.
 
         Returns:
             Result instance or None if deduplicated.
@@ -386,7 +450,11 @@ class TaskQueueManager:
 
         try:
             self._mark_processing(task_id)
-            result = run_code_agent_issue(issue_number)
+            result = run_code_agent_issue(
+                issue_number,
+                installation_id=installation_id,
+                repository=repository,
+            )
             logger.info(f"[Queue] Enqueued code generation for issue #{issue_number}")
             return result
 
@@ -399,12 +467,16 @@ class TaskQueueManager:
         self,
         pr_number: int,
         deduplicate: bool = True,
+        installation_id: int | None = None,
+        repository: str | None = None,
     ) -> Result[Any] | None:
         """Enqueue PR review task.
 
         Args:
             pr_number: GitHub PR number.
             deduplicate: Skip if already queued/processing.
+            installation_id: GitHub App installation ID (for multi-tenant support).
+            repository: Repository in owner/repo format.
 
         Returns:
             Result instance or None if deduplicated.
@@ -420,7 +492,11 @@ class TaskQueueManager:
 
         try:
             self._mark_processing(task_id)
-            result = run_reviewer_agent(pr_number)
+            result = run_reviewer_agent(
+                pr_number,
+                installation_id=installation_id,
+                repository=repository,
+            )
             logger.info(f"[Queue] Enqueued PR review for #{pr_number}")
             return result
 
@@ -433,12 +509,16 @@ class TaskQueueManager:
         self,
         pr_number: int,
         deduplicate: bool = True,
+        installation_id: int | None = None,
+        repository: str | None = None,
     ) -> Result[Any] | None:
         """Enqueue PR iteration task.
 
         Args:
             pr_number: GitHub PR number.
             deduplicate: Skip if already queued/processing.
+            installation_id: GitHub App installation ID (for multi-tenant support).
+            repository: Repository in owner/repo format.
 
         Returns:
             Result instance or None if deduplicated.
@@ -454,7 +534,11 @@ class TaskQueueManager:
 
         try:
             self._mark_processing(task_id)
-            result = run_code_agent_pr(pr_number)
+            result = run_code_agent_pr(
+                pr_number,
+                installation_id=installation_id,
+                repository=repository,
+            )
             logger.info(f"[Queue] Enqueued PR iteration for #{pr_number}")
             return result
 

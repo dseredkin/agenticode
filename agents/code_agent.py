@@ -68,6 +68,8 @@ class CodeAgent:
         code_formatter: CodeFormatter | None = None,
         max_iterations: int | None = None,
         iteration_timeout: int | None = None,
+        installation_id: int | None = None,
+        repository: str | None = None,
     ) -> None:
         """Initialize Code Agent.
 
@@ -77,12 +79,19 @@ class CodeAgent:
             code_formatter: Code formatter instance.
             max_iterations: Maximum number of generation attempts.
             iteration_timeout: Timeout per iteration in seconds.
+            installation_id: GitHub App installation ID (for multi-tenant support).
+            repository: Repository in owner/repo format.
         """
         if github_client:
             self._github = github_client
+        elif installation_id:
+            self._github = GitHubClient(
+                installation_id=installation_id,
+                repository=repository,
+            )
         else:
             token = os.environ.get("CODE_AGENT_TOKEN") or os.environ.get("GITHUB_TOKEN")
-            self._github = GitHubClient(token=token)
+            self._github = GitHubClient(token=token, repository=repository)
         self._llm = llm_client or LLMClient()
         self._formatter = code_formatter or CodeFormatter()
         self._max_iterations = max_iterations or int(
