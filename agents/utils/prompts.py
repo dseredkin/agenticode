@@ -71,6 +71,34 @@ Focus specifically on resolving the validation errors while maintaining the orig
 Generate the corrected implementation:
 """
 
+PR_REVIEW_ITERATION_PROMPT = """## Review Feedback
+A code reviewer has requested changes to the pull request.
+
+### Review Comments
+{review_feedback}
+
+### Current Code
+{current_code}
+
+## Original Requirements
+Title: {issue_title}
+Description:
+{issue_body}
+
+## Iteration
+This is iteration {iteration} of {max_iterations}.
+
+## Task
+Address the review feedback and generate corrected code.
+Focus on:
+1. Fixing all issues mentioned in the review
+2. Implementing suggested improvements
+3. Maintaining the original functionality
+4. Following code quality standards
+
+Generate the corrected implementation:
+"""
+
 CODE_REVIEW_SYSTEM_PROMPT = """You are an expert code reviewer. Your task is to review pull requests and provide constructive feedback.
 
 Review criteria:
@@ -86,11 +114,24 @@ Return a JSON object with the following structure:
 {
     "status": "APPROVE" or "REQUEST_CHANGES",
     "requirements_met": true/false,
-    "ci_passing": true/false,
-    "issues": ["list of problems found"],
+    "issues": ["list of general problems found"],
     "suggestions": ["list of improvement suggestions"],
-    "summary": "brief review summary"
+    "summary": "brief review summary",
+    "line_comments": [
+        {
+            "path": "path/to/file.py",
+            "line": 10,
+            "body": "Specific comment about this line"
+        }
+    ]
 }
+
+IMPORTANT:
+- Use "line_comments" to provide specific feedback on exact lines in the code
+- The "line" number should match the line in the NEW version of the file (from the diff, lines starting with +)
+- Only add line_comments for actionable issues that need human attention
+- If CI is failing, status must be REQUEST_CHANGES
+- If there are no issues AND CI is passing, status should be APPROVE
 """
 
 CODE_REVIEW_PROMPT = """## Original Issue
@@ -116,10 +157,16 @@ Failed Checks: {failed_checks}
 ## Task
 Review this pull request and determine if it should be approved or if changes are needed.
 
+IMPORTANT RULES:
+1. If CI status is "failure" or "pending", you MUST use status "REQUEST_CHANGES"
+2. If CI status is "success" AND there are no critical issues, use status "APPROVE"
+3. For each specific issue, add a line_comment with the exact file path and line number
+4. Line numbers in line_comments should reference the NEW file (lines with + in diff)
+
 Consider:
 1. Does the code fulfill the requirements from the original issue?
 2. Are there any bugs, security issues, or code quality problems?
-3. Are the CI checks passing?
+3. Are the CI checks passing? (This is CRITICAL - failing CI = REQUEST_CHANGES)
 4. Is the code properly tested?
 
 Provide your review as a JSON object:
@@ -196,6 +243,37 @@ def format_code_iteration_prompt(
         issue_body=issue_body,
         previous_code=previous_code,
         validation_errors=errors_str,
+    )
+
+
+def format_pr_review_iteration_prompt(
+    issue_title: str,
+    issue_body: str,
+    current_code: str,
+    review_feedback: str,
+    iteration: int,
+    max_iterations: int,
+) -> str:
+    """Format the PR review iteration prompt.
+
+    Args:
+        issue_title: The issue title.
+        issue_body: The issue description.
+        current_code: The current code that needs to be fixed.
+        review_feedback: Feedback from the code review.
+        iteration: Current iteration number.
+        max_iterations: Maximum allowed iterations.
+
+    Returns:
+        Formatted prompt string.
+    """
+    return PR_REVIEW_ITERATION_PROMPT.format(
+        issue_title=issue_title,
+        issue_body=issue_body,
+        current_code=current_code,
+        review_feedback=review_feedback,
+        iteration=iteration,
+        max_iterations=max_iterations,
     )
 
 

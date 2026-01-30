@@ -23,6 +23,7 @@ jobs:
 
       - name: Run Code Agent
         env:
+          CODE_AGENT_TOKEN: ${{ secrets.CODE_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}

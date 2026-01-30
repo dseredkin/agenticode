@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -10,7 +11,13 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from agents.utils.github_client import CIStatus, GitHubClient, IssueDetails, PRDetails
+from agents.utils.github_client import (
+    CIStatus,
+    GitHubClient,
+    IssueDetails,
+    PRDetails,
+    ReviewComment,
+)
 from agents.utils.llm_client import LLMClient
 from agents.utils.prompts import CODE_REVIEW_SYSTEM_PROMPT, format_code_review_prompt
 
@@ -19,6 +26,14 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+class LineComment(BaseModel):
+    """Line-specific review comment."""
+
+    path: str
+    line: int
+    body: str
 
 
 class ReviewDecision(BaseModel):
@@ -30,6 +45,7 @@ class ReviewDecision(BaseModel):
     issues: list[str]
     suggestions: list[str]
     summary: str
+    line_comments: list[LineComment] = []
 
 
 @dataclass
@@ -55,7 +71,18 @@ class ReviewerAgent:
             github_client: GitHub client instance.
             llm_client: LLM client instance.
         """
-        self._github = github_client or GitHubClient()
+        if github_client:
+            self._github = github_client
+        else:
+            from agents.utils.github_app import get_app_token_from_env
+
+            # Try GitHub App token first, then PAT
+            token = get_app_token_from_env()
+            if not token:
+                token = os.environ.get("REVIEWER_AGENT_TOKEN")
+            if not token:
+                token = os.environ.get("GITHUB_TOKEN")
+            self._github = GitHubClient(token=token)
         self._llm = llm_client or LLMClient()
 
     def run(self, pr_number: int, wait_for_ci: bool = True) -> ReviewResult:
@@ -192,18 +219,41 @@ class ReviewerAgent:
         if json_match:
             try:
                 data = json.loads(json_match.group())
+
+                # Parse line comments
+                line_comments: list[LineComment] = []
+                for lc in data.get("line_comments", []):
+                    if all(k in lc for k in ["path", "line", "body"]):
+                        line_comments.append(LineComment(
+                            path=lc["path"],
+                            line=lc["line"],
+                            body=lc["body"],
+                        ))
+
+                ci_passing = ci_status.state == "success"
+                status = data.get("status", "REQUEST_CHANGES")
+
+                # Enforce CI rules
+                if not ci_passing and status == "APPROVE":
+                    status = "REQUEST_CHANGES"
+
+                # Only approve if CI passes AND no line comments
+                if status == "APPROVE" and line_comments:
+                    status = "REQUEST_CHANGES"
+
                 decision = ReviewDecision(
-                    status=data.get("status", "REQUEST_CHANGES"),
+                    status=status,
                     requirements_met=data.get("requirements_met", False),
-                    ci_passing=ci_status.state == "success",
+                    ci_passing=ci_passing,
                     issues=data.get("issues", []),
                     suggestions=data.get("suggestions", []),
                     summary=data.get("summary", ""),
+                    line_comments=line_comments,
                 )
 
-                if not decision.ci_passing and decision.status == "APPROVE":
-                    decision.status = "REQUEST_CHANGES"
-                    decision.issues.append("CI checks are failing")
+                if not decision.ci_passing:
+                    if "CI checks are failing" not in decision.issues:
+                        decision.issues.append("CI checks are failing")
 
                 return decision
             except json.JSONDecodeError as e:
@@ -216,6 +266,7 @@ class ReviewerAgent:
             issues=["Could not parse review response"],
             suggestions=[],
             summary=response[:500],
+            line_comments=[],
         )
 
     def _post_review(self, pr_number: int, decision: ReviewDecision) -> None:
@@ -239,15 +290,33 @@ class ReviewerAgent:
             for suggestion in decision.suggestions:
                 body_parts.append(f"- {suggestion}")
 
+        if decision.line_comments:
+            body_parts.append(f"\n### Line Comments: {len(decision.line_comments)}")
+            body_parts.append("Please resolve the inline comments below.")
+
         body_parts.append("\n---")
-        body_parts.append(f"**Requirements Met:** {'Yes' if decision.requirements_met else 'No'}")
-        body_parts.append(f"**CI Passing:** {'Yes' if decision.ci_passing else 'No'}")
+        req_met = "Yes" if decision.requirements_met else "No"
+        ci_pass = "Yes" if decision.ci_passing else "No"
+        body_parts.append(f"**Requirements Met:** {req_met}")
+        body_parts.append(f"**CI Passing:** {ci_pass}")
         body_parts.append("\n*Generated by Reviewer Agent*")
 
         body = "\n".join(body_parts)
-        self._github.post_review(pr_number, body, event)
+
+        # Convert line comments to ReviewComment format
+        review_comments: list[ReviewComment] = []
+        for lc in decision.line_comments:
+            review_comments.append(ReviewComment(
+                body=lc.body,
+                path=lc.path,
+                line=lc.line,
+            ))
+
+        self._github.post_review(pr_number, body, event, review_comments or None)
 
         logger.info(f"Posted {event} review on PR #{pr_number}")
+        if review_comments:
+            logger.info(f"  with {len(review_comments)} line comments")
 
 
 def main() -> None:

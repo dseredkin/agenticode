@@ -12,6 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: ci
     if: contains(github.event.pull_request.title, 'feat:') || contains(github.event.pull_request.labels.*.name, 'auto-review')
+    outputs:
+      decision: ${{ steps.parse-result.outputs.decision }}
+      needs_iteration: ${{ steps.parse-result.outputs.needs_iteration }}
 
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +30,7 @@ jobs:
 
       - name: Run Reviewer Agent
         env:
+          REVIEWER_AGENT_TOKEN: ${{ secrets.REVIEWER_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
@@ -39,8 +43,8 @@ jobs:
           uv run python -m agents.reviewer_agent --pr ${{ github.event.pull_request.number }} --no-wait-ci --output-json > result.json
           cat result.json
 
-      - name: Handle review result
-        if: always()
+      - name: Parse review result
+        id: parse-result
         uses: actions/github-script@v7
         with:
           script: |
@@ -50,21 +54,145 @@ jobs:
               result = JSON.parse(fs.readFileSync('result.json', 'utf8'));
             } catch (e) {
               console.log('Failed to parse result:', e);
+              core.setOutput('decision', 'ERROR');
+              core.setOutput('needs_iteration', 'false');
               return;
             }
 
             if (!result.success) {
               console.log('Review failed:', result.error);
+              core.setOutput('decision', 'ERROR');
+              core.setOutput('needs_iteration', 'false');
               return;
             }
 
             const decision = result.decision;
+            core.setOutput('decision', decision.status);
+
             if (decision.status === 'REQUEST_CHANGES' && decision.issues.length > 0) {
-              // Add label for re-generation
-              github.rest.issues.addLabels({
+              await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
+                issue_number: context.payload.pull_request.number,
                 labels: ['needs-revision']
               });
+              core.setOutput('needs_iteration', 'true');
+            } else if (decision.status === 'APPROVE') {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: ['approved']
+              });
+              core.setOutput('needs_iteration', 'false');
+            } else {
+              core.setOutput('needs_iteration', 'false');
+            }
+
+  iterate:
+    runs-on: ubuntu-latest
+    needs: review
+    if: needs.review.outputs.needs_iteration == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Check iteration count
+        id: check-iterations
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number
+            });
+
+            let currentIteration = 0;
+            for (const label of labels) {
+              if (label.name.startsWith('iteration-')) {
+                const num = parseInt(label.name.split('-')[1], 10);
+                if (!isNaN(num)) {
+                  currentIteration = num;
+                  break;
+                }
+              }
+            }
+
+            const maxIterations = 5;
+            console.log(`Current iteration: ${currentIteration}, max: ${maxIterations}`);
+
+            if (currentIteration >= maxIterations) {
+              core.setOutput('should_iterate', 'false');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: `Maximum iterations (${maxIterations}) reached. Manual intervention required.`
+              });
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: ['max-iterations-reached']
+              });
+            } else {
+              core.setOutput('should_iterate', 'true');
+            }
+
+      - name: Install uv
+        if: steps.check-iterations.outputs.should_iterate == 'true'
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        if: steps.check-iterations.outputs.should_iterate == 'true'
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        if: steps.check-iterations.outputs.should_iterate == 'true'
+        run: uv sync
+
+      - name: Run Code Agent iteration
+        if: steps.check-iterations.outputs.should_iterate == 'true'
+        env:
+          CODE_AGENT_TOKEN: ${{ secrets.CODE_AGENT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+          YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+        run: |
+          uv run python -m agents.code_agent --pr ${{ github.event.pull_request.number }} --output-json > iteration_result.json
+          cat iteration_result.json
+
+      - name: Handle iteration result
+        if: steps.check-iterations.outputs.should_iterate == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let result;
+            try {
+              result = JSON.parse(fs.readFileSync('iteration_result.json', 'utf8'));
+            } catch (e) {
+              console.log('Failed to parse iteration result:', e);
+              return;
+            }
+
+            if (!result.success) {
+              console.log('Iteration failed:', result.error);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: `Code iteration failed: ${result.error}`
+              });
+            } else {
+              console.log('Iteration succeeded, PR updated');
             }

@@ -4,7 +4,6 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from github import Auth, Github, GithubException
@@ -412,3 +411,71 @@ class GitHubClient:
         if f"Closes #{issue_number}" not in current_body:
             new_body = f"{current_body}\n\nCloses #{issue_number}"
             pr.edit(body=new_body.strip())
+
+    def get_pr_reviews(self, pr_number: int) -> list[dict[str, Any]]:
+        """Get all reviews for a pull request.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            List of review dictionaries with body, state, and user.
+        """
+        pr = self._repo.get_pull(pr_number)
+        reviews: list[dict[str, Any]] = []
+        for review in pr.get_reviews():
+            reviews.append({
+                "id": review.id,
+                "body": review.body or "",
+                "state": review.state,
+                "user": review.user.login if review.user else "unknown",
+                "submitted_at": review.submitted_at.isoformat() if review.submitted_at else None,
+            })
+        return reviews
+
+    def get_review_comments(self, pr_number: int) -> list[dict[str, Any]]:
+        """Get all review comments for a pull request.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            List of comment dictionaries with body, path, line, and user.
+        """
+        pr = self._repo.get_pull(pr_number)
+        comments: list[dict[str, Any]] = []
+        for comment in pr.get_review_comments():
+            comments.append({
+                "id": comment.id,
+                "body": comment.body,
+                "path": comment.path,
+                "line": comment.line,
+                "user": comment.user.login if comment.user else "unknown",
+            })
+        return comments
+
+    def get_pr_labels(self, pr_number: int) -> list[str]:
+        """Get labels for a pull request.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            List of label names.
+        """
+        issue = self._repo.get_issue(pr_number)
+        return [label.name for label in issue.labels]
+
+    def remove_label(self, issue_or_pr_number: int, label: str) -> None:
+        """Remove a label from an issue or PR.
+
+        Args:
+            issue_or_pr_number: The issue or PR number.
+            label: Label name to remove.
+        """
+        issue = self._repo.get_issue(issue_or_pr_number)
+        try:
+            issue.remove_from_labels(label)
+        except GithubException as e:
+            if e.status != 404:
+                raise
