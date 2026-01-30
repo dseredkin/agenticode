@@ -198,27 +198,29 @@ class GitHubClient:
         )
 
     def get_repo_structure(self, path: str = "") -> list[str]:
-        """List files in the repository.
+        """List files in the repository using Git Tree API (single API call).
 
         Args:
-            path: Optional path to list files from.
+            path: Optional path prefix to filter files.
 
         Returns:
             List of file paths in the repository.
         """
         files: list[str] = []
         try:
-            contents = self._repo.get_contents(path)
-            if not isinstance(contents, list):
-                contents = [contents]
+            # Use Git Tree API with recursive=True for single API call
+            default_branch = self._repo.default_branch
+            branch = self._repo.get_branch(default_branch)
+            tree = self._repo.get_git_tree(branch.commit.sha, recursive=True)
 
-            for content in contents:
-                if content.type == "dir":
-                    files.extend(self.get_repo_structure(content.path))
-                else:
-                    files.append(content.path)
+            for item in tree.tree:
+                if item.type == "blob":  # Files only, not directories
+                    if not path or item.path.startswith(path):
+                        files.append(item.path)
+
+            logger.debug(f"Fetched {len(files)} files from repo tree")
         except GithubException as e:
-            logger.warning(f"Failed to get repo structure at {path}: {e}")
+            logger.warning(f"Failed to get repo structure: {e}")
         return files
 
     def get_file_content(self, path: str, ref: str | None = None) -> str | None:

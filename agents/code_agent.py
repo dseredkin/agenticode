@@ -144,8 +144,13 @@ class CodeAgent:
                 error=f"Failed to fetch issue: {e}",
             )
 
+        logger.info("Fetching repository structure...")
         repo_structure = self._github.get_repo_structure()
+        logger.info(f"Found {len(repo_structure)} files in repository")
+
+        logger.info("Fetching relevant code for context...")
         existing_code = self._get_relevant_code(repo_structure, issue)
+        logger.info(f"Found {len(existing_code)} relevant files")
 
         iterations: list[IterationResult] = []
         current_files: list[GeneratedFile] = []
@@ -174,8 +179,10 @@ class CodeAgent:
                 current_files = result.files
                 previous_errors = result.errors
                 logger.warning(
-                    f"Iteration {iteration} failed with {len(result.errors)} errors"
+                    f"Iteration {iteration} failed with {len(result.errors)} errors:"
                 )
+                for err in result.errors:
+                    logger.warning(f"  - {err}")
 
             except TimeoutError:
                 logger.error(f"Iteration {iteration} timed out")
@@ -278,13 +285,15 @@ class CodeAgent:
                 errors=["No code files generated - LLM response could not be parsed"],
             )
 
+        logger.info(f"Generated {len(files)} files: {[f.path for f in files]}")
+
         # Parallel validation
+        logger.info("Validating generated files...")
         validated_files, all_errors = self._validate_files_parallel(files)
 
         success = len(all_errors) == 0
-        if all_errors:
-            for err in all_errors:
-                logger.debug(f"Validation error: {err}")
+        if success:
+            logger.info("All files passed validation")
         return IterationResult(
             iteration=iteration,
             files=validated_files,
@@ -449,8 +458,16 @@ class CodeAgent:
                     path=file.path,
                     content=validation.black_result.formatted_code,
                 )
+            if validation.all_errors:
+                err_count = len(validation.all_errors)
+                logger.info(f"Validation failed for {file.path}: {err_count} errors")
+                for err in validation.all_errors:
+                    logger.info(f"  [{file.path}] {err}")
+            else:
+                logger.info(f"Validation passed for {file.path}")
             return idx, file, validation.all_errors
 
+        logger.info(f"Validating {len(py_files)} Python files...")
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(validate_file, i, f) for i, f in py_files]
             for future in as_completed(futures):
