@@ -1,4 +1,18 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   webhook-server:
     build: .
     ports:
@@ -18,7 +32,34 @@ services:
       - MAX_REVIEW_ROUNDS
       - WEBHOOK_SECRET
       - WEBHOOK_PORT=8000
+      - REDIS_URL=redis://redis:6379
     command: uv run python webhook_server.py
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: .
+    environment:
+      - GITHUB_TOKEN
+      - CODE_AGENT_TOKEN
+      - REVIEWER_AGENT_TOKEN
+      - GITHUB_REPOSITORY
+      - LLM_PROVIDER
+      - LLM_MODEL
+      - OPENAI_API_KEY
+      - GROK_API_KEY
+      - YANDEX_API_KEY
+      - YANDEX_FOLDER_ID
+      - MAX_ITERATIONS
+      - REDIS_URL=redis://redis:6379
+    command: uv run rq worker agents --url redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 3
     restart: unless-stopped
 
   code-agent:
@@ -36,6 +77,8 @@ services:
       - MAX_ITERATIONS
       - ITERATION_TIMEOUT
     command: uv run python -m agents.code_agent --issue ${ISSUE_NUMBER:-1}
+    profiles:
+      - manual
 
   reviewer-agent:
     build: .
@@ -50,6 +93,8 @@ services:
       - YANDEX_API_KEY
       - YANDEX_FOLDER_ID
     command: uv run python -m agents.reviewer_agent --pr ${PR_NUMBER:-1}
+    profiles:
+      - manual
 
   orchestrator:
     build: .
@@ -67,3 +112,8 @@ services:
       - MAX_ITERATIONS
       - MAX_REVIEW_ROUNDS
     command: uv run python -m agents.interaction_orchestrator --issue ${ISSUE_NUMBER:-1}
+    profiles:
+      - manual
+
+volumes:
+  redis_data:

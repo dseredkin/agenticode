@@ -14,6 +14,8 @@ dependencies = [
     "pyjwt[crypto]>=2.10.1",
     "flask>=3.0.0",
     "gunicorn>=21.0.0",
+    "redis>=5.0.0",
+    "rq>=1.16.0",
 ]
 
 [project.optional-dependencies]
@@ -72,6 +74,7 @@ ignore = [
 "tests/*" = ["S101"]
 "webhook_server.py" = ["S104", "S603"]
 "agents/issue_moderator.py" = ["E501"]  # Long lines in template strings
+"agents/task_queue.py" = ["S110"]  # Intentional try-except-pass for job existence checks
 
 [tool.mypy]
 python_version = "3.11"

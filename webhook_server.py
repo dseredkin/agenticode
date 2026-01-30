@@ -1,15 +1,14 @@
-"""Webhook server for GitHub events - event-driven agent coordination."""
+"""Webhook server for GitHub events with Redis queue."""
 
 import hashlib
 import hmac
 import logging
 import os
-import subprocess
-import sys
-from threading import Thread
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+
+from agents.task_queue import TaskQueueManager
 
 load_dotenv()
 
@@ -23,6 +22,16 @@ app = Flask(__name__)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "5"))
+
+queue_manager: TaskQueueManager | None = None
+
+
+def get_queue_manager() -> TaskQueueManager:
+    """Get or create queue manager singleton."""
+    global queue_manager
+    if queue_manager is None:
+        queue_manager = TaskQueueManager()
+    return queue_manager
 
 
 def verify_signature(payload: bytes, signature: str) -> bool:
@@ -45,32 +54,15 @@ def verify_signature(payload: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
-def run_agent(command: list[str], event_type: str, event_id: str) -> None:
-    """Run agent in background thread."""
-    logger.info(f"[{event_id}] Running: {' '.join(command)}")
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode == 0:
-            logger.info(f"[{event_id}] {event_type} completed successfully")
-            if result.stdout:
-                logger.info(f"[{event_id}] Output: {result.stdout[:500]}")
-        else:
-            logger.error(f"[{event_id}] {event_type} failed: {result.stderr}")
-    except subprocess.TimeoutExpired:
-        logger.error(f"[{event_id}] {event_type} timed out after 600s")
-    except Exception as e:
-        logger.error(f"[{event_id}] {event_type} error: {e}")
-
-
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint."""
-    return jsonify({"status": "ok"})
+    try:
+        qm = get_queue_manager()
+        stats = qm.get_queue_stats()
+        return jsonify({"status": "ok", "queue": stats})
+    except Exception as e:
+        return jsonify({"status": "degraded", "error": str(e)})
 
 
 @app.route("/webhook", methods=["POST"])
@@ -123,40 +115,35 @@ def handle_issue_event(payload: dict, delivery_id: str):
         return jsonify({"status": "ignored", "reason": f"action={action}"})
 
     labels = [label.get("name", "") for label in issue.get("labels", [])]
+    qm = get_queue_manager()
 
-    # If auto-generate label, trigger Code Agent
     if "auto-generate" in labels:
-        command = [
-            sys.executable,
-            "-m",
-            "agents.code_agent",
-            "--issue",
-            str(issue_number),
-            "--output-json",
-        ]
-        thread = Thread(
-            target=run_agent,
-            args=(command, "code_agent", delivery_id),
-        )
-        thread.start()
-        return jsonify({"status": "processing", "agent": "code_agent"})
+        job = qm.enqueue_code_generation(issue_number)
+        if job:
+            return jsonify({
+                "status": "queued",
+                "agent": "code_agent",
+                "job_id": job.id,
+            })
+        return jsonify({
+            "status": "deduplicated",
+            "agent": "code_agent",
+            "reason": "already processing",
+        })
 
-    # For new issues without auto-generate, run Issue Moderator
     if action == "opened":
-        command = [
-            sys.executable,
-            "-m",
-            "agents.issue_moderator",
-            "--issue",
-            str(issue_number),
-            "--output-json",
-        ]
-        thread = Thread(
-            target=run_agent,
-            args=(command, "issue_moderator", delivery_id),
-        )
-        thread.start()
-        return jsonify({"status": "processing", "agent": "issue_moderator"})
+        job = qm.enqueue_issue_moderate(issue_number)
+        if job:
+            return jsonify({
+                "status": "queued",
+                "agent": "issue_moderator",
+                "job_id": job.id,
+            })
+        return jsonify({
+            "status": "deduplicated",
+            "agent": "issue_moderator",
+            "reason": "already processing",
+        })
 
     return jsonify({"status": "ignored", "reason": "no matching trigger"})
 
@@ -181,27 +168,25 @@ def handle_pr_event(payload: dict, delivery_id: str):
     if not (title.startswith("feat:") or "auto-review" in labels):
         return jsonify({"status": "ignored", "reason": "no auto-review trigger"})
 
-    # Check iteration count from labels
     iteration = get_iteration_from_labels(labels)
     if iteration >= MAX_ITERATIONS:
         logger.warning(f"[{delivery_id}] Max iterations reached for PR #{pr_number}")
         return jsonify({"status": "ignored", "reason": "max iterations reached"})
 
-    command = [
-        sys.executable,
-        "-m",
-        "agents.reviewer_agent",
-        "--pr",
-        str(pr_number),
-        "--output-json",
-    ]
-    thread = Thread(
-        target=run_agent,
-        args=(command, "reviewer_agent", delivery_id),
-    )
-    thread.start()
+    qm = get_queue_manager()
+    job = qm.enqueue_pr_review(pr_number)
 
-    return jsonify({"status": "processing", "agent": "reviewer_agent"})
+    if job:
+        return jsonify({
+            "status": "queued",
+            "agent": "reviewer_agent",
+            "job_id": job.id,
+        })
+    return jsonify({
+        "status": "deduplicated",
+        "agent": "reviewer_agent",
+        "reason": "already processing",
+    })
 
 
 def handle_pr_review_event(payload: dict, delivery_id: str):
@@ -231,27 +216,25 @@ def handle_pr_review_event(payload: dict, delivery_id: str):
     if not (title.startswith("feat:") or "auto-review" in labels):
         return jsonify({"status": "ignored", "reason": "not an auto-review PR"})
 
-    # Check iteration count
     iteration = get_iteration_from_labels(labels)
     if iteration >= MAX_ITERATIONS:
         logger.warning(f"[{delivery_id}] Max iterations reached for PR #{pr_number}")
         return jsonify({"status": "ignored", "reason": "max iterations reached"})
 
-    command = [
-        sys.executable,
-        "-m",
-        "agents.code_agent",
-        "--pr",
-        str(pr_number),
-        "--output-json",
-    ]
-    thread = Thread(
-        target=run_agent,
-        args=(command, "code_agent", delivery_id),
-    )
-    thread.start()
+    qm = get_queue_manager()
+    job = qm.enqueue_pr_iteration(pr_number)
 
-    return jsonify({"status": "processing", "agent": "code_agent"})
+    if job:
+        return jsonify({
+            "status": "queued",
+            "agent": "code_agent",
+            "job_id": job.id,
+        })
+    return jsonify({
+        "status": "deduplicated",
+        "agent": "code_agent",
+        "reason": "already processing",
+    })
 
 
 def get_iteration_from_labels(labels: list[str]) -> int:
@@ -265,121 +248,88 @@ def get_iteration_from_labels(labels: list[str]) -> int:
     return 0
 
 
+@app.route("/queue/stats", methods=["GET"])
+def queue_stats():
+    """Get queue statistics."""
+    qm = get_queue_manager()
+    return jsonify(qm.get_queue_stats())
+
+
+@app.route("/queue/job/<job_id>", methods=["GET"])
+def job_status(job_id: str):
+    """Get status of a specific job."""
+    qm = get_queue_manager()
+    status = qm.get_job_status(job_id)
+    if status:
+        return jsonify(status)
+    return jsonify({"error": "Job not found"}), 404
+
+
 @app.route("/trigger/issue/<int:issue_number>/moderate", methods=["POST"])
 def trigger_issue_moderate(issue_number: int):
     """Manually trigger Issue Moderator to classify an issue."""
-    delivery_id = f"manual-moderate-{issue_number}"
-    command = [
-        sys.executable,
-        "-m",
-        "agents.issue_moderator",
-        "--issue",
-        str(issue_number),
-        "--output-json",
-    ]
-    thread = Thread(
-        target=run_agent,
-        args=(command, "issue_moderator", delivery_id),
-    )
-    thread.start()
-    return jsonify(
-        {
-            "status": "processing",
-            "agent": "issue_moderator",
-            "issue": issue_number,
-        }
-    )
+    qm = get_queue_manager()
+    job = qm.enqueue_issue_moderate(issue_number, deduplicate=False)
+    return jsonify({
+        "status": "queued",
+        "agent": "issue_moderator",
+        "issue": issue_number,
+        "job_id": job.id if job else None,
+    })
 
 
 @app.route("/trigger/issue/<int:issue_number>/generate", methods=["POST"])
 def trigger_issue_generate(issue_number: int):
     """Manually trigger Code Agent to generate code from an issue."""
-    delivery_id = f"manual-generate-{issue_number}"
-    command = [
-        sys.executable,
-        "-m",
-        "agents.code_agent",
-        "--issue",
-        str(issue_number),
-        "--output-json",
-    ]
-    thread = Thread(
-        target=run_agent,
-        args=(command, "code_agent", delivery_id),
-    )
-    thread.start()
-    return jsonify(
-        {
-            "status": "processing",
-            "agent": "code_agent",
-            "issue": issue_number,
-        }
-    )
+    qm = get_queue_manager()
+    job = qm.enqueue_code_generation(issue_number, deduplicate=False)
+    return jsonify({
+        "status": "queued",
+        "agent": "code_agent",
+        "issue": issue_number,
+        "job_id": job.id if job else None,
+    })
 
 
 @app.route("/trigger/pr/<int:pr_number>/review", methods=["POST"])
 def trigger_pr_review(pr_number: int):
     """Manually trigger Reviewer Agent for a PR."""
-    delivery_id = f"manual-review-{pr_number}"
-    command = [
-        sys.executable,
-        "-m",
-        "agents.reviewer_agent",
-        "--pr",
-        str(pr_number),
-        "--output-json",
-    ]
-    thread = Thread(
-        target=run_agent,
-        args=(command, "reviewer_agent", delivery_id),
-    )
-    thread.start()
-    return jsonify(
-        {
-            "status": "processing",
-            "agent": "reviewer_agent",
-            "pr": pr_number,
-        }
-    )
+    qm = get_queue_manager()
+    job = qm.enqueue_pr_review(pr_number, deduplicate=False)
+    return jsonify({
+        "status": "queued",
+        "agent": "reviewer_agent",
+        "pr": pr_number,
+        "job_id": job.id if job else None,
+    })
 
 
 @app.route("/trigger/pr/<int:pr_number>/iterate", methods=["POST"])
 def trigger_pr_iteration(pr_number: int):
     """Manually trigger Code Agent to iterate on PR feedback."""
-    delivery_id = f"manual-iterate-{pr_number}"
-    command = [
-        sys.executable,
-        "-m",
-        "agents.code_agent",
-        "--pr",
-        str(pr_number),
-        "--output-json",
-    ]
-    thread = Thread(
-        target=run_agent,
-        args=(command, "code_agent", delivery_id),
-    )
-    thread.start()
-    return jsonify(
-        {
-            "status": "processing",
-            "agent": "code_agent",
-            "pr": pr_number,
-        }
-    )
+    qm = get_queue_manager()
+    job = qm.enqueue_pr_iteration(pr_number, deduplicate=False)
+    return jsonify({
+        "status": "queued",
+        "agent": "code_agent",
+        "pr": pr_number,
+        "job_id": job.id if job else None,
+    })
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("WEBHOOK_PORT", "8000"))
     logger.info(f"Starting webhook server on port {port}")
-    logger.info("Event-driven flow:")
-    logger.info("  Issue (opened) -> Issue Moderator classifies & responds")
-    logger.info("  Issue (auto-generate) -> Code Agent creates PR")
-    logger.info("  PR (opened/sync) -> Reviewer Agent reviews")
-    logger.info("  Review (changes_requested) -> Code Agent iterates")
+    logger.info("Event-driven flow with Redis queue:")
+    logger.info("  Issue (opened) -> Queue -> Issue Moderator classifies & responds")
+    logger.info("  Issue (auto-generate) -> Queue -> Code Agent creates PR")
+    logger.info("  PR (opened/sync) -> Queue -> Reviewer Agent reviews")
+    logger.info("  Review (changes_requested) -> Queue -> Code Agent iterates")
     logger.info("")
     logger.info("Endpoints:")
     logger.info("  POST /webhook - GitHub webhook receiver")
+    logger.info("  GET  /queue/stats - Queue statistics")
+    logger.info("  GET  /queue/job/<id> - Job status")
     logger.info("  POST /trigger/issue/<n>/moderate - Issue Moderator")
     logger.info("  POST /trigger/issue/<n>/generate - Code Agent from issue")
     logger.info("  POST /trigger/pr/<n>/review - Reviewer Agent")
