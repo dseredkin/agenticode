@@ -110,7 +110,7 @@ def start_consumer_thread(workers: int = 12) -> None:
                 huey,
                 workers=workers,
                 worker_type="thread",
-                scheduler_interval=60,  # Check scheduled tasks every 60s
+                scheduler_interval=10,  # Check scheduled tasks every 10s
                 check_worker_health=False,  # Reduce Redis health checks
             )
             _consumer_started.set()
