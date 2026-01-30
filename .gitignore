@@ -58,3 +58,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 .serena/
+
+# Task queue data
+data/

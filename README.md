@@ -122,8 +122,11 @@ Endpoints:
 ### Docker
 
 ```bash
-# Run webhook server with worker
-docker-compose up webhook-server worker
+# Run webhook server (includes embedded worker)
+docker-compose up webhook-server
+
+# For scaling: use dedicated workers
+docker-compose --profile scale up
 
 # Run orchestrator for an issue
 ISSUE_NUMBER=123 docker-compose run orchestrator
@@ -133,7 +136,7 @@ ISSUE_NUMBER=123 docker-compose run code-agent
 PR_NUMBER=456 docker-compose run reviewer-agent
 ```
 
-The task queue uses SQLite (via Huey), so no external Redis service is required.
+The task queue uses SQLite (via Huey) with an embedded worker, so no external services are required. For high-load scenarios, disable the embedded worker (`ENABLE_EMBEDDED_WORKER=false`) and use dedicated worker containers.
 
 ## Deployment
 
@@ -145,18 +148,13 @@ The task queue uses SQLite (via Huey), so no external Redis service is required.
    - Click **Create App** -> Select your GitHub repo
    - It will auto-detect the Dockerfile
 
-3. Add a **Worker** component for background task processing:
-   - Click **Create Resource** -> **Worker**
-   - Set command: `uv run huey_consumer.py agents.task_queue.huey -w 2 -k process`
-
-4. Add environment variables in **Settings**:
+3. Add environment variables in **Settings**:
    - `GITHUB_TOKEN` (secret)
    - `GITHUB_REPOSITORY` (e.g., `yourname/yourrepo`)
    - `OPENAI_API_KEY` (secret)
    - `WEBHOOK_SECRET` (secret, optional)
-   - `HUEY_DB_PATH` (e.g., `/app/data/huey.db`)
 
-5. Configure GitHub webhook:
+4. Configure GitHub webhook:
    - Go to your repo -> **Settings** -> **Webhooks** -> **Add webhook**
    - **Payload URL**: `https://your-app-url.ondigitalocean.app/webhook`
    - **Content type**: `application/json`
@@ -165,6 +163,8 @@ The task queue uses SQLite (via Huey), so no external Redis service is required.
      - `Issues`
      - `Pull requests`
      - `Pull request reviews`
+
+The webhook server includes an embedded task worker by default. For scaling, add a separate Worker component with `ENABLE_EMBEDDED_WORKER=false` on the web service and command `uv run huey_consumer.py agents.task_queue.huey -w 2 -k process` on the worker.
 
 ### Using doctl CLI
 

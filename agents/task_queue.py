@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -11,8 +12,12 @@ from typing import Any
 
 from huey import SqliteHuey
 from huey.api import Result
+from huey.consumer import Consumer
 
 logger = logging.getLogger(__name__)
+
+_consumer_thread: threading.Thread | None = None
+_consumer_started = threading.Event()
 
 # Default database path
 DEFAULT_DB_PATH = os.environ.get(
@@ -78,6 +83,45 @@ def get_huey(db_path: str | None = None) -> SqliteHuey:
 
 # Global huey instance for task registration
 huey = get_huey()
+
+
+def start_consumer_thread(workers: int = 2) -> None:
+    """Start Huey consumer in a background thread.
+
+    This allows running the task queue without a separate worker process.
+    Call this once when your application starts.
+
+    Args:
+        workers: Number of worker threads.
+    """
+    global _consumer_thread
+
+    if _consumer_started.is_set():
+        logger.info("[Queue] Consumer already running")
+        return
+
+    def run_consumer() -> None:
+        try:
+            consumer = Consumer(
+                huey,
+                workers=workers,
+                worker_type="thread",
+            )
+            _consumer_started.set()
+            logger.info(f"[Queue] Starting embedded consumer with {workers} workers")
+            consumer.run()
+        except Exception as e:
+            logger.error(f"[Queue] Consumer error: {e}")
+            _consumer_started.clear()
+
+    _consumer_thread = threading.Thread(target=run_consumer, daemon=True)
+    _consumer_thread.start()
+
+    _consumer_started.wait(timeout=5)
+    if _consumer_started.is_set():
+        logger.info("[Queue] Consumer started successfully")
+    else:
+        logger.warning("[Queue] Consumer may not have started properly")
 
 
 @huey.task(retries=3, retry_delay=60)

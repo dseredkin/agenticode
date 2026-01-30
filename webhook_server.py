@@ -13,6 +13,7 @@ from agents.task_queue import (
     QueueEnqueueError,
     QueueError,
     TaskQueueManager,
+    start_consumer_thread,
 )
 
 load_dotenv()
@@ -24,6 +25,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Start embedded task consumer (no separate worker needed)
+_embed_worker = os.environ.get("ENABLE_EMBEDDED_WORKER", "true").lower()
+if _embed_worker == "true":
+    start_consumer_thread(workers=2)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "5"))
