@@ -234,6 +234,31 @@ uv run python -m agents.reviewer_agent --pr 456 --output-json
 uv run python -m agents.interaction_orchestrator --issue 123 --output-json
 ```
 
+## Validation & Metrics
+
+Scripts for measuring AgentiCode performance:
+
+```bash
+# Create 20 test issues in a repository
+uv run python validation_setup.py --repo owner/repo --token ghp_xxx
+
+# Dry run (preview without creating)
+uv run python validation_setup.py --repo owner/repo --token ghp_xxx --dry-run
+
+# Calculate approval rate for validation issues
+uv run python validation_metrics.py --repo owner/repo --token ghp_xxx
+
+# Verbose output with details per issue
+uv run python validation_metrics.py --repo owner/repo --token ghp_xxx -v
+
+# Basic approval rate for all agent PRs
+uv run python metrics.py --repo owner/repo --token ghp_xxx
+```
+
+**Approval Rate** = (Merged + Approved PRs) / Total Agent PRs
+
+This metric shows how effectively the Code Agent resolves issues without manual intervention.
+
 ## Webhook Endpoints
 
 - `POST /webhook` - GitHub webhook receiver
@@ -277,6 +302,9 @@ agenticode/
 ├── tests/                      # Tests (103 tests)
 ├── .github/workflows/          # GitHub Actions
 ├── webhook_server.py           # Flask webhook server
+├── metrics.py                  # Basic approval rate calculation
+├── validation_setup.py         # Create test issues for validation
+├── validation_metrics.py       # Calculate metrics for validation issues
 ├── Dockerfile                  # Container build
 ├── docker-compose.yml          # Docker Compose config
 └── pyproject.toml              # Project dependencies
