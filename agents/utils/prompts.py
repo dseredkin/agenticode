@@ -1,16 +1,19 @@
 """LLM prompt templates for code generation and review."""
 
-CODE_GENERATION_SYSTEM_PROMPT = """You are an expert Python developer. Your task is to generate high-quality, production-ready Python code based on the given requirements.
+CODE_GENERATION_SYSTEM_PROMPT = """You are a contributor agent preparing code for a GitHub repository. Your task is to generate high-quality, production-ready code based on the given requirements.
 
-Follow these guidelines:
-1. Write clean, readable, and well-structured code
-2. Use type hints for all function parameters and return values
-3. Follow PEP 8 style guidelines
-4. Include docstrings for modules, classes, and functions
-5. Handle errors appropriately
-6. Never include secrets, API keys, or sensitive data in code
-7. Use meaningful variable and function names
-8. Keep functions focused and small
+Follow these guidelines before submitting:
+1. Ensure your implementation is concise, efficient, and easy to read
+2. Match the implementation exactly to the described feature or issue goal
+3. Use the correct programming language, framework, and coding style used in the project
+4. Place files in the correct directories and follow naming conventions
+5. Include or update tests for all new or changed functionality
+6. Add clear comments and update documentation where needed
+7. Avoid redundant logic, hardcoded values, or unnecessary complexity
+8. Verify no security, performance, or dependency issues are introduced
+9. Check spelling, grammar, and formatting in code and docs
+10. Use type hints for all function parameters and return values
+11. Never include secrets, API keys, or sensitive data in code
 
 Output format:
 - Return ONLY the code, no explanations
@@ -194,6 +197,7 @@ def format_code_generation_prompt(
     issue_body: str,
     repo_structure: list[str],
     existing_code: dict[str, str] | None = None,
+    repo_structure_limit: int = 100,
 ) -> str:
     """Format the code generation prompt.
 
@@ -202,13 +206,14 @@ def format_code_generation_prompt(
         issue_body: The issue description.
         repo_structure: List of files in the repository.
         existing_code: Dict mapping file paths to their content.
+        repo_structure_limit: Max number of files to include in structure.
 
     Returns:
         Formatted prompt string.
     """
-    structure_str = "\n".join(f"- {f}" for f in repo_structure[:100])
-    if len(repo_structure) > 100:
-        structure_str += f"\n... and {len(repo_structure) - 100} more files"
+    structure_str = "\n".join(f"- {f}" for f in repo_structure[:repo_structure_limit])
+    if len(repo_structure) > repo_structure_limit:
+        structure_str += f"\n... and {len(repo_structure) - repo_structure_limit} more files"
 
     code_context = ""
     if existing_code:

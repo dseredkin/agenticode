@@ -177,6 +177,11 @@ MAX_ITERATIONS=5                        # Max code generation attempts
 ITERATION_TIMEOUT=600                   # Seconds per iteration
 WEBHOOK_PORT=8000                       # Webhook server port
 WEBHOOK_SECRET=xxx                      # GitHub webhook secret
+
+# Repository Traversal (Code Agent context)
+REPO_STRUCTURE_LIMIT=100                # Max files in repo structure
+FILES_TO_CHECK_LIMIT=30                 # Max files to scan for keywords
+RELEVANT_FILES_LIMIT=10                 # Max relevant files as context
 ```
 
 > **Important:** If using PATs, `CODE_AGENT_TOKEN` and `REVIEWER_AGENT_TOKEN` must be from **different GitHub accounts**. GitHub doesn't allow users to approve their own PRs. Using the GitHub Apps ([agenticode-contributor](https://github.com/apps/agenticode-contributor) and [agenticode-reviewer](https://github.com/apps/agenticode-reviewer)) is the recommended approach as they handle identity separation automatically.

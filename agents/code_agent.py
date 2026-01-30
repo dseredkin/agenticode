@@ -120,6 +120,15 @@ class CodeAgent:
         self._iteration_timeout = iteration_timeout or int(
             os.environ.get("ITERATION_TIMEOUT", "600")
         )
+        self._repo_structure_limit = int(
+            os.environ.get("REPO_STRUCTURE_LIMIT", "100")
+        )
+        self._files_to_check_limit = int(
+            os.environ.get("FILES_TO_CHECK_LIMIT", "30")
+        )
+        self._relevant_files_limit = int(
+            os.environ.get("RELEVANT_FILES_LIMIT", "10")
+        )
 
     def run(self, issue_number: int) -> GenerationResult:
         """Run code generation for an issue.
@@ -270,6 +279,7 @@ class CodeAgent:
                 issue_body=issue.body,
                 repo_structure=repo_structure,
                 existing_code=existing_code,
+                repo_structure_limit=self._repo_structure_limit,
             )
 
         logger.info(f"Prompt length: {len(prompt)} chars")
@@ -406,7 +416,7 @@ class CodeAgent:
 
         # Parallel fetch file contents for keyword matching
         file_contents: dict[str, str] = {}
-        files_to_check = python_files[:30]
+        files_to_check = python_files[: self._files_to_check_limit]
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_path = {
@@ -431,7 +441,7 @@ class CodeAgent:
 
         # Return relevant files (already fetched, no need to re-fetch)
         result: dict[str, str] = {}
-        for file_path in relevant_files[:10]:
+        for file_path in relevant_files[: self._relevant_files_limit]:
             if file_path in file_contents:
                 result[file_path] = file_contents[file_path]
 
