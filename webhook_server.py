@@ -87,7 +87,7 @@ def request_too_large(e):
 # For local development without gunicorn, set ENABLE_EMBEDDED_WORKER_STARTUP=true
 _startup_consumer = os.environ.get("ENABLE_EMBEDDED_WORKER_STARTUP", "false").lower()
 if _startup_consumer == "true":
-    _num_workers = int(os.environ.get("QUEUE_WORKERS", "12"))
+    _num_workers = int(os.environ.get("QUEUE_WORKERS", "48"))
     start_consumer_thread(workers=_num_workers)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")

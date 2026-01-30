@@ -78,7 +78,7 @@ def get_huey(redis_url: str | None = None) -> RedisHuey:
 huey = get_huey()
 
 
-def start_consumer_thread(workers: int = 12) -> None:
+def start_consumer_thread(workers: int = 48) -> None:
     """Start Huey consumer in a background thread.
 
     This allows running the task queue without a separate worker process.

@@ -32,7 +32,7 @@ services:
       - ENABLE_EMBEDDED_WORKER=true
       - WEB_WORKERS=4
       - WORKER_CONNECTIONS=1000
-      - QUEUE_WORKERS=12
+      - QUEUE_WORKERS=48
     depends_on:
       - redis
     command: uv run gunicorn -c gunicorn.conf.py webhook_server:app
