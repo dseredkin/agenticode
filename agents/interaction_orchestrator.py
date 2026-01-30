@@ -152,7 +152,23 @@ class InteractionOrchestrator:
                     final_status="approved",
                 )
 
-            logger.info("Changes requested, running code iteration")
+            if review_result.decision.status != "REQUEST_CHANGES":
+                logger.error(
+                    f"Unexpected review status: {review_result.decision.status}. "
+                    "Expected APPROVE or REQUEST_CHANGES."
+                )
+                return InteractionResult(
+                    success=False,
+                    pr_number=pr_number,
+                    review_rounds=current_round,
+                    final_status="error",
+                    error=f"Unexpected review status: {review_result.decision.status}",
+                )
+
+            logger.info(
+                f"Reviewer explicitly requested changes "
+                f"(status: {review_result.decision.status}), running code iteration"
+            )
 
             iteration_result = self._code_agent.run_pr_iteration(pr_number)
 
