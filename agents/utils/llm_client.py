@@ -158,19 +158,51 @@ class GrokProvider(BaseLLMProvider):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = self._client.post(
-            "/chat/completions",
-            json={
-                "model": self._model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response = self._client.post(
+                "/chat/completions",
+                json={
+                    "model": self._model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+            )
+        except httpx.TimeoutException as e:
+            logger.error(f"Grok API timeout: {e}")
+            raise
+        except httpx.ConnectError as e:
+            logger.error(f"Grok API connection error: {e}")
+            raise
 
-        content = data["choices"][0]["message"]["content"]
+        # Handle rate limiting
+        if response.status_code == 429:
+            retry_after = response.headers.get("retry-after", "60")
+            logger.warning(f"Grok API rate limited. Retry after: {retry_after}s")
+            raise httpx.HTTPStatusError(
+                f"Rate limited. Retry after {retry_after}s",
+                request=response.request,
+                response=response,
+            )
+
+        response.raise_for_status()
+
+        try:
+            data = response.json()
+        except Exception as e:
+            logger.error(f"Failed to parse Grok API response: {e}")
+            logger.error(f"Response text: {response.text[:500]}")
+            raise ValueError(f"Invalid JSON response from Grok API: {e}")
+
+        # Validate response structure
+        if "choices" not in data or not data["choices"]:
+            logger.error(f"Grok API returned no choices: {data}")
+            raise ValueError("Grok API returned empty choices")
+
+        content = data["choices"][0].get("message", {}).get("content", "")
+        if not content:
+            logger.warning("Grok API returned empty content")
+
         usage = data.get("usage", {})
 
         return LLMResponse(
@@ -358,6 +390,34 @@ class LLMClient:
                 )
                 return response
 
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                # Longer delay for rate limiting
+                if e.response.status_code == 429:
+                    retry_after = e.response.headers.get("retry-after")
+                    delay = int(retry_after) if retry_after else 60
+                    logger.warning(
+                        f"Rate limited (attempt {attempt + 1}/{self._max_retries}). "
+                        f"Waiting {delay}s..."
+                    )
+                else:
+                    delay = self._retry_delay * (2**attempt)
+                    logger.warning(
+                        f"HTTP error {e.response.status_code} "
+                        f"(attempt {attempt + 1}/{self._max_retries}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                time.sleep(delay)
+
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                last_error = e
+                delay = self._retry_delay * (2**attempt)
+                logger.warning(
+                    f"Connection error (attempt {attempt + 1}/{self._max_retries}): "
+                    f"{e}. Retrying in {delay}s..."
+                )
+                time.sleep(delay)
+
             except Exception as e:
                 last_error = e
                 delay = self._retry_delay * (2**attempt)
@@ -367,6 +427,7 @@ class LLMClient:
                 )
                 time.sleep(delay)
 
+        logger.error(f"All {self._max_retries} LLM retries failed. Last error: {last_error}")
         raise last_error or Exception("All retries failed")
 
     def generate_code(
