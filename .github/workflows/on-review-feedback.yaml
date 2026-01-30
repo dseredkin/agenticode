@@ -1,0 +1,128 @@
+name: Address Review Feedback
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  iterate:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.review.state == 'changes_requested' &&
+      startsWith(github.event.pull_request.title, 'feat:')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.CODE_AGENT_TOKEN }}
+
+      - name: Check iteration limit
+        id: check_limit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            let iteration = 0;
+            for (const label of labels) {
+              if (label.startsWith('iteration-')) {
+                iteration = parseInt(label.split('-')[1]) || 0;
+                break;
+              }
+            }
+
+            const maxIterations = parseInt('${{ vars.MAX_ITERATIONS }}') || 5;
+            if (iteration >= maxIterations) {
+              console.log(`Max iterations (${maxIterations}) reached`);
+              core.setOutput('should_continue', 'false');
+            } else {
+              console.log(`Iteration ${iteration + 1} of ${maxIterations}`);
+              core.setOutput('should_continue', 'true');
+            }
+
+      - name: Install uv
+        if: steps.check_limit.outputs.should_continue == 'true'
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        if: steps.check_limit.outputs.should_continue == 'true'
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        if: steps.check_limit.outputs.should_continue == 'true'
+        run: uv sync
+
+      - name: Run Code Agent iteration
+        if: steps.check_limit.outputs.should_continue == 'true'
+        env:
+          CODE_AGENT_TOKEN: ${{ secrets.CODE_AGENT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+          YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+        run: |
+          uv run python -m agents.code_agent --pr ${{ github.event.pull_request.number }} --output-json > iteration_result.json
+          cat iteration_result.json
+
+      - name: Comment on PR
+        if: steps.check_limit.outputs.should_continue == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let result;
+            try {
+              result = JSON.parse(fs.readFileSync('iteration_result.json', 'utf8'));
+            } catch (e) {
+              console.log('Failed to parse result:', e);
+              return;
+            }
+
+            let body;
+            if (result.success) {
+              body = `**Code Agent** has addressed the review feedback.
+
+**Iteration:** ${result.iterations}
+**Files updated:** ${result.files.join(', ')}
+
+Changes have been pushed. Awaiting re-review.`;
+            } else {
+              body = `**Code Agent** failed to address feedback.
+
+**Error:** ${result.error}
+
+Manual intervention may be required.`;
+            }
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: body
+            });
+
+      - name: Max iterations reached
+        if: steps.check_limit.outputs.should_continue == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `**Code Agent** has reached the maximum iteration limit.
+
+Manual intervention is required to complete this PR.`
+            });
+
+            github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['needs-manual-review']
+            });

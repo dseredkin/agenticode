@@ -1,13 +1,12 @@
-name: Code Generation
+name: Issue Processing
 
 on:
   issues:
     types: [opened]
 
 jobs:
-  generate:
+  moderate-and-generate:
     runs-on: ubuntu-latest
-    if: contains(github.event.issue.labels.*.name, 'auto-generate')
 
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +20,27 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Run Issue Moderator
+        id: moderate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+          YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+        run: |
+          uv run python -m agents.issue_moderator --issue ${{ github.event.issue.number }} --output-json > moderate_result.json
+          cat moderate_result.json
+
+          # Extract issue type for next step
+          ISSUE_TYPE=$(cat moderate_result.json | python -c "import sys,json; print(json.load(sys.stdin).get('classification',{}).get('type','unknown'))")
+          echo "issue_type=$ISSUE_TYPE" >> $GITHUB_OUTPUT
+
       - name: Run Code Agent
+        if: steps.moderate.outputs.issue_type == 'bug' || steps.moderate.outputs.issue_type == 'suggestion' || steps.moderate.outputs.issue_type == 'documentation'
         env:
           CODE_AGENT_TOKEN: ${{ secrets.CODE_AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -34,8 +53,8 @@ jobs:
           YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
           MAX_ITERATIONS: ${{ vars.MAX_ITERATIONS || '5' }}
         run: |
-          uv run python -m agents.code_agent --issue ${{ github.event.issue.number }} --output-json > result.json
-          cat result.json
+          uv run python -m agents.code_agent --issue ${{ github.event.issue.number }} --output-json > generate_result.json
+          cat generate_result.json
 
       - name: Comment on issue
         if: always()
@@ -43,25 +62,44 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let result;
+
+            // Check moderation result
+            let modResult;
             try {
-              result = JSON.parse(fs.readFileSync('result.json', 'utf8'));
+              modResult = JSON.parse(fs.readFileSync('moderate_result.json', 'utf8'));
             } catch (e) {
-              result = { success: false, error: 'Failed to parse result' };
+              modResult = { success: false, error: 'Moderation failed' };
+            }
+
+            if (!modResult.success) {
+              return; // Moderator already posted comment
+            }
+
+            // Check if code generation ran
+            let genResult;
+            try {
+              genResult = JSON.parse(fs.readFileSync('generate_result.json', 'utf8'));
+            } catch (e) {
+              // Code generation didn't run (question/unknown issue type)
+              return;
             }
 
             let body;
-            if (result.success) {
-              body = `Code generation completed successfully!
+            if (genResult.success) {
+              body = `**Code Agent** has created a PR to address this issue.
 
-            **PR:** #${result.pr_number}
-            **Files generated:** ${result.files.join(', ')}
-            **Iterations:** ${result.iterations}`;
+**PR:** #${genResult.pr_number}
+**Files:** ${genResult.files.join(', ')}
+**Iterations:** ${genResult.iterations}
+
+The PR will now be reviewed by the AI Reviewer Agent.`;
             } else {
-              body = `Code generation failed.
+              body = `**Code Agent** failed to generate a solution.
 
-            **Error:** ${result.error}
-            **Iterations:** ${result.iterations || 0}`;
+**Error:** ${genResult.error}
+**Iterations:** ${genResult.iterations || 0}
+
+Please provide more details or try a different approach.`;
             }
 
             github.rest.issues.createComment({
