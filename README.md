@@ -65,6 +65,8 @@ cp .env.example .env
 | `GITHUB_TOKEN` | GitHub PAT with repo access (fallback) |
 | `CODE_AGENT_TOKEN` | PAT for Code Agent (creates branches, PRs) |
 | `REVIEWER_AGENT_TOKEN` | PAT for Reviewer Agent (reviews, approves) |
+
+> **Important:** `CODE_AGENT_TOKEN` and `REVIEWER_AGENT_TOKEN` must be from **different GitHub identities** (different accounts or a GitHub App). GitHub doesn't allow users to approve their own PRs, so the reviewer must be a different identity than the code author.
 | `GITHUB_REPOSITORY` | Repository in owner/repo format |
 | `LLM_PROVIDER` | Provider: `openai`, `grok`, `yandex` |
 | `LLM_MODEL` | Model to use (provider-specific) |
