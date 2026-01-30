@@ -86,7 +86,7 @@ def request_too_large(e):
 # Start embedded task consumer (no separate worker needed)
 _embed_worker = os.environ.get("ENABLE_EMBEDDED_WORKER", "true").lower()
 if _embed_worker == "true":
-    _num_workers = int(os.environ.get("QUEUE_WORKERS", "8"))
+    _num_workers = int(os.environ.get("QUEUE_WORKERS", "12"))
     start_consumer_thread(workers=_num_workers)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
