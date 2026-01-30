@@ -167,16 +167,15 @@ def run_issue_moderator(
 
         if result.success and result.classification:
             issue_type = result.classification.issue_type
-            if issue_type in ("bug", "suggestion", "documentation"):
-                logger.info(
-                    f"[Queue] Issue #{issue_number} classified as {issue_type}, "
-                    "triggering code generation"
-                )
-                run_code_agent_issue(
-                    issue_number,
-                    installation_id=installation_id,
-                    repository=repository,
-                )
+            logger.info(
+                f"[Queue] Issue #{issue_number} classified as {issue_type}, "
+                "triggering code generation"
+            )
+            run_code_agent_issue(
+                issue_number,
+                installation_id=installation_id,
+                repository=repository,
+            )
 
         return {
             "success": result.success,
