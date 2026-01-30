@@ -247,11 +247,7 @@ class CodeFormatter:
 
         mypy_result = self.type_check_code(current_code, filename)
 
-        success = (
-            black_result.success
-            and ruff_result.success
-            and mypy_result.success
-        )
+        success = black_result.success and ruff_result.success and mypy_result.success
 
         return ValidationSummary(
             success=success,
@@ -278,11 +274,7 @@ class CodeFormatter:
         ruff_result = self._run_ruff_on_files(files)
         mypy_result = self.type_check(files)
 
-        success = (
-            black_result.success
-            and ruff_result.success
-            and mypy_result.success
-        )
+        success = black_result.success and ruff_result.success and mypy_result.success
 
         return ValidationSummary(
             success=success,
@@ -313,9 +305,7 @@ class CodeFormatter:
         errors: list[str] = []
         if result.returncode != 0:
             if result.stderr:
-                errors = [
-                    line for line in result.stderr.strip().split("\n") if line
-                ]
+                errors = [line for line in result.stderr.strip().split("\n") if line]
             else:
                 errors = ["Files need formatting"]
 

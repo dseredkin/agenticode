@@ -125,6 +125,7 @@ class GitHubClient:
             private_key = private_key_env
         else:
             from pathlib import Path
+
             private_key = Path(private_key_env).read_text()
 
         return get_installation_token(app_id, private_key, str(installation_id))
@@ -390,9 +391,11 @@ class GitHubClient:
                 if check.conclusion and check.conclusion not in ("success", "skipped"):
                     failed_checks.append(check.name)
 
-            all_complete = all(
-                c.conclusion is not None for c in check_runs
-            ) if check_runs else combined_status.state != "pending"
+            all_complete = (
+                all(c.conclusion is not None for c in check_runs)
+                if check_runs
+                else combined_status.state != "pending"
+            )
 
             if all_complete:
                 state = "success" if not failed_checks else "failure"
@@ -432,11 +435,13 @@ class GitHubClient:
         if comments:
             for comment in comments:
                 if comment.path and comment.line:
-                    review_comments.append({
-                        "path": comment.path,
-                        "line": comment.line,
-                        "body": comment.body,
-                    })
+                    review_comments.append(
+                        {
+                            "path": comment.path,
+                            "line": comment.line,
+                            "body": comment.body,
+                        }
+                    )
 
         if review_comments:
             pr.create_review(body=body, event=event, comments=review_comments)
@@ -489,13 +494,17 @@ class GitHubClient:
         pr = self._repo.get_pull(pr_number)
         reviews: list[dict[str, Any]] = []
         for review in pr.get_reviews():
-            reviews.append({
-                "id": review.id,
-                "body": review.body or "",
-                "state": review.state,
-                "user": review.user.login if review.user else "unknown",
-                "submitted_at": review.submitted_at.isoformat() if review.submitted_at else None,
-            })
+            reviews.append(
+                {
+                    "id": review.id,
+                    "body": review.body or "",
+                    "state": review.state,
+                    "user": review.user.login if review.user else "unknown",
+                    "submitted_at": (
+                        review.submitted_at.isoformat() if review.submitted_at else None
+                    ),
+                }
+            )
         return reviews
 
     def get_review_comments(self, pr_number: int) -> list[dict[str, Any]]:
@@ -510,13 +519,15 @@ class GitHubClient:
         pr = self._repo.get_pull(pr_number)
         comments: list[dict[str, Any]] = []
         for comment in pr.get_review_comments():
-            comments.append({
-                "id": comment.id,
-                "body": comment.body,
-                "path": comment.path,
-                "line": comment.line,
-                "user": comment.user.login if comment.user else "unknown",
-            })
+            comments.append(
+                {
+                    "id": comment.id,
+                    "body": comment.body,
+                    "path": comment.path,
+                    "line": comment.line,
+                    "user": comment.user.login if comment.user else "unknown",
+                }
+            )
         return comments
 
     def get_pr_labels(self, pr_number: int) -> list[str]:
@@ -554,11 +565,13 @@ class GitHubClient:
         issue = self._repo.get_issue(issue_number)
         comments: list[dict[str, Any]] = []
         for comment in issue.get_comments():
-            comments.append({
-                "id": comment.id,
-                "body": comment.body,
-                "user": comment.user.login if comment.user else "unknown",
-            })
+            comments.append(
+                {
+                    "id": comment.id,
+                    "body": comment.body,
+                    "user": comment.user.login if comment.user else "unknown",
+                }
+            )
         return comments
 
     def remove_label(self, issue_or_pr_number: int, label: str) -> None:

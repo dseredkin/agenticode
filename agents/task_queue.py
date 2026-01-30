@@ -173,13 +173,15 @@ def run_issue_moderator(
             "success": result.success,
             "issue_number": result.issue_number,
             "error": result.error,
-            "classification": {
-                "type": result.classification.issue_type,
-                "severity": result.classification.severity,
-                "labels": result.classification.labels,
-            }
-            if result.classification
-            else None,
+            "classification": (
+                {
+                    "type": result.classification.issue_type,
+                    "severity": result.classification.severity,
+                    "labels": result.classification.labels,
+                }
+                if result.classification
+                else None
+            ),
         }
     except Exception as e:
         logger.error(f"[Queue] Issue moderator failed for #{issue_number}: {e}")

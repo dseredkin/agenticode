@@ -233,11 +233,13 @@ class ReviewerAgent:
                 line_comments: list[LineComment] = []
                 for lc in data.get("line_comments", []):
                     if all(k in lc for k in ["path", "line", "body"]):
-                        line_comments.append(LineComment(
-                            path=lc["path"],
-                            line=lc["line"],
-                            body=lc["body"],
-                        ))
+                        line_comments.append(
+                            LineComment(
+                                path=lc["path"],
+                                line=lc["line"],
+                                body=lc["body"],
+                            )
+                        )
 
                 ci_passing = ci_status.state == "success"
                 status = data.get("status", "REQUEST_CHANGES")
@@ -315,11 +317,13 @@ class ReviewerAgent:
         # Convert line comments to ReviewComment format
         review_comments: list[ReviewComment] = []
         for lc in decision.line_comments:
-            review_comments.append(ReviewComment(
-                body=lc.body,
-                path=lc.path,
-                line=lc.line,
-            ))
+            review_comments.append(
+                ReviewComment(
+                    body=lc.body,
+                    path=lc.path,
+                    line=lc.line,
+                )
+            )
 
         self._github.post_review(pr_number, body, event, review_comments or None)
 

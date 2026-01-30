@@ -138,25 +138,40 @@ def webhook():
             return jsonify({"status": "ignored", "event": event})
     except QueueConnectionError as e:
         logger.error(f"[{delivery_id}] Queue connection error: {e}")
-        return jsonify({
-            "status": "error",
-            "error": "Queue unavailable",
-            "details": str(e),
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "Queue unavailable",
+                    "details": str(e),
+                }
+            ),
+            503,
+        )
     except QueueEnqueueError as e:
         logger.error(f"[{delivery_id}] Failed to enqueue: {e}")
-        return jsonify({
-            "status": "error",
-            "error": "Failed to queue task",
-            "details": str(e),
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "Failed to queue task",
+                    "details": str(e),
+                }
+            ),
+            503,
+        )
     except Exception as e:
         logger.error(f"[{delivery_id}] Unexpected error: {e}")
-        return jsonify({
-            "status": "error",
-            "error": "Internal error",
-            "details": str(e),
-        }), 500
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "Internal error",
+                    "details": str(e),
+                }
+            ),
+            500,
+        )
 
 
 def handle_installation_event(payload: dict, delivery_id: str):
@@ -191,33 +206,41 @@ def handle_installation_event(payload: dict, delivery_id: str):
             repositories=repo_names,
         )
 
-        return jsonify({
-            "status": "created",
-            "installation_id": installation_id,
-            "account": account_login,
-            "repositories": len(repo_names),
-        })
+        return jsonify(
+            {
+                "status": "created",
+                "installation_id": installation_id,
+                "account": account_login,
+                "repositories": len(repo_names),
+            }
+        )
 
     elif action == "deleted":
         store.remove_installation(installation_id)
-        return jsonify({
-            "status": "deleted",
-            "installation_id": installation_id,
-        })
+        return jsonify(
+            {
+                "status": "deleted",
+                "installation_id": installation_id,
+            }
+        )
 
     elif action == "suspend":
         store.suspend_installation(installation_id)
-        return jsonify({
-            "status": "suspended",
-            "installation_id": installation_id,
-        })
+        return jsonify(
+            {
+                "status": "suspended",
+                "installation_id": installation_id,
+            }
+        )
 
     elif action == "unsuspend":
         store.unsuspend_installation(installation_id)
-        return jsonify({
-            "status": "unsuspended",
-            "installation_id": installation_id,
-        })
+        return jsonify(
+            {
+                "status": "unsuspended",
+                "installation_id": installation_id,
+            }
+        )
 
     return jsonify({"status": "ignored", "action": action})
 
@@ -239,21 +262,25 @@ def handle_installation_repositories_event(payload: dict, delivery_id: str):
         repositories = payload.get("repositories_added", [])
         repo_names = [repo.get("full_name") for repo in repositories]
         count = store.add_repositories(installation_id, repo_names)
-        return jsonify({
-            "status": "repos_added",
-            "installation_id": installation_id,
-            "count": count,
-        })
+        return jsonify(
+            {
+                "status": "repos_added",
+                "installation_id": installation_id,
+                "count": count,
+            }
+        )
 
     elif action == "removed":
         repositories = payload.get("repositories_removed", [])
         repo_names = [repo.get("full_name") for repo in repositories]
         count = store.remove_repositories(installation_id, repo_names)
-        return jsonify({
-            "status": "repos_removed",
-            "installation_id": installation_id,
-            "count": count,
-        })
+        return jsonify(
+            {
+                "status": "repos_removed",
+                "installation_id": installation_id,
+                "count": count,
+            }
+        )
 
     return jsonify({"status": "ignored", "action": action})
 
@@ -289,16 +316,20 @@ def handle_issue_event(payload: dict, delivery_id: str):
             repository=repository,
         )
         if job:
-            return jsonify({
-                "status": "queued",
+            return jsonify(
+                {
+                    "status": "queued",
+                    "agent": "code_agent",
+                    "job_id": job.id,
+                }
+            )
+        return jsonify(
+            {
+                "status": "deduplicated",
                 "agent": "code_agent",
-                "job_id": job.id,
-            })
-        return jsonify({
-            "status": "deduplicated",
-            "agent": "code_agent",
-            "reason": "already processing",
-        })
+                "reason": "already processing",
+            }
+        )
 
     if action == "opened":
         job = qm.enqueue_issue_moderate(
@@ -307,16 +338,20 @@ def handle_issue_event(payload: dict, delivery_id: str):
             repository=repository,
         )
         if job:
-            return jsonify({
-                "status": "queued",
+            return jsonify(
+                {
+                    "status": "queued",
+                    "agent": "issue_moderator",
+                    "job_id": job.id,
+                }
+            )
+        return jsonify(
+            {
+                "status": "deduplicated",
                 "agent": "issue_moderator",
-                "job_id": job.id,
-            })
-        return jsonify({
-            "status": "deduplicated",
-            "agent": "issue_moderator",
-            "reason": "already processing",
-        })
+                "reason": "already processing",
+            }
+        )
 
     return jsonify({"status": "ignored", "reason": "no matching trigger"})
 
@@ -359,16 +394,20 @@ def handle_pr_event(payload: dict, delivery_id: str):
     )
 
     if job:
-        return jsonify({
-            "status": "queued",
+        return jsonify(
+            {
+                "status": "queued",
+                "agent": "reviewer_agent",
+                "job_id": job.id,
+            }
+        )
+    return jsonify(
+        {
+            "status": "deduplicated",
             "agent": "reviewer_agent",
-            "job_id": job.id,
-        })
-    return jsonify({
-        "status": "deduplicated",
-        "agent": "reviewer_agent",
-        "reason": "already processing",
-    })
+            "reason": "already processing",
+        }
+    )
 
 
 def handle_pr_review_event(payload: dict, delivery_id: str):
@@ -416,16 +455,20 @@ def handle_pr_review_event(payload: dict, delivery_id: str):
     )
 
     if job:
-        return jsonify({
-            "status": "queued",
+        return jsonify(
+            {
+                "status": "queued",
+                "agent": "code_agent",
+                "job_id": job.id,
+            }
+        )
+    return jsonify(
+        {
+            "status": "deduplicated",
             "agent": "code_agent",
-            "job_id": job.id,
-        })
-    return jsonify({
-        "status": "deduplicated",
-        "agent": "code_agent",
-        "reason": "already processing",
-    })
+            "reason": "already processing",
+        }
+    )
 
 
 def get_iteration_from_labels(labels: list[str]) -> int:
@@ -474,18 +517,25 @@ def trigger_issue_moderate(issue_number: int):
     try:
         qm = get_queue_manager()
         job = qm.enqueue_issue_moderate(issue_number, deduplicate=False)
-        return jsonify({
-            "status": "queued",
-            "agent": "issue_moderator",
-            "issue": issue_number,
-            "job_id": job.id if job else None,
-        })
+        return jsonify(
+            {
+                "status": "queued",
+                "agent": "issue_moderator",
+                "issue": issue_number,
+                "job_id": job.id if job else None,
+            }
+        )
     except QueueError as e:
-        return jsonify({
-            "status": "error",
-            "error": "Queue unavailable",
-            "details": str(e),
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "Queue unavailable",
+                    "details": str(e),
+                }
+            ),
+            503,
+        )
 
 
 @app.route("/trigger/issue/<int:issue_number>/generate", methods=["POST"])
@@ -494,18 +544,25 @@ def trigger_issue_generate(issue_number: int):
     try:
         qm = get_queue_manager()
         job = qm.enqueue_code_generation(issue_number, deduplicate=False)
-        return jsonify({
-            "status": "queued",
-            "agent": "code_agent",
-            "issue": issue_number,
-            "job_id": job.id if job else None,
-        })
+        return jsonify(
+            {
+                "status": "queued",
+                "agent": "code_agent",
+                "issue": issue_number,
+                "job_id": job.id if job else None,
+            }
+        )
     except QueueError as e:
-        return jsonify({
-            "status": "error",
-            "error": "Queue unavailable",
-            "details": str(e),
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "Queue unavailable",
+                    "details": str(e),
+                }
+            ),
+            503,
+        )
 
 
 @app.route("/trigger/pr/<int:pr_number>/review", methods=["POST"])
@@ -514,18 +571,25 @@ def trigger_pr_review(pr_number: int):
     try:
         qm = get_queue_manager()
         job = qm.enqueue_pr_review(pr_number, deduplicate=False)
-        return jsonify({
-            "status": "queued",
-            "agent": "reviewer_agent",
-            "pr": pr_number,
-            "job_id": job.id if job else None,
-        })
+        return jsonify(
+            {
+                "status": "queued",
+                "agent": "reviewer_agent",
+                "pr": pr_number,
+                "job_id": job.id if job else None,
+            }
+        )
     except QueueError as e:
-        return jsonify({
-            "status": "error",
-            "error": "Queue unavailable",
-            "details": str(e),
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "Queue unavailable",
+                    "details": str(e),
+                }
+            ),
+            503,
+        )
 
 
 @app.route("/trigger/pr/<int:pr_number>/iterate", methods=["POST"])
@@ -534,18 +598,25 @@ def trigger_pr_iteration(pr_number: int):
     try:
         qm = get_queue_manager()
         job = qm.enqueue_pr_iteration(pr_number, deduplicate=False)
-        return jsonify({
-            "status": "queued",
-            "agent": "code_agent",
-            "pr": pr_number,
-            "job_id": job.id if job else None,
-        })
+        return jsonify(
+            {
+                "status": "queued",
+                "agent": "code_agent",
+                "pr": pr_number,
+                "job_id": job.id if job else None,
+            }
+        )
     except QueueError as e:
-        return jsonify({
-            "status": "error",
-            "error": "Queue unavailable",
-            "details": str(e),
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "Queue unavailable",
+                    "details": str(e),
+                }
+            ),
+            503,
+        )
 
 
 if __name__ == "__main__":

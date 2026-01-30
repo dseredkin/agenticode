@@ -73,14 +73,14 @@ class TestReviewerAgent:
     def mock_llm(self):
         """Create a mock LLM client."""
         client = MagicMock()
-        client.generate_code.return_value = '''{
+        client.generate_code.return_value = """{
     "status": "APPROVE",
     "requirements_met": true,
     "ci_passing": true,
     "issues": [],
     "suggestions": ["Consider adding docstring"],
     "summary": "Implementation looks correct"
-}'''
+}"""
         return client
 
     @pytest.fixture
@@ -102,14 +102,14 @@ class TestReviewerAgent:
 
     def test_run_request_changes(self, agent, mock_github, mock_llm):
         """Test requesting changes on a PR."""
-        mock_llm.generate_code.return_value = '''{
+        mock_llm.generate_code.return_value = """{
     "status": "REQUEST_CHANGES",
     "requirements_met": false,
     "ci_passing": true,
     "issues": ["Missing type hints"],
     "suggestions": [],
     "summary": "Please add type hints"
-}'''
+}"""
 
         result = agent.run(42)
 
@@ -133,14 +133,14 @@ class TestReviewerAgent:
             failed_checks=["test"],
         )
 
-        mock_llm.generate_code.return_value = '''{
+        mock_llm.generate_code.return_value = """{
     "status": "APPROVE",
     "requirements_met": true,
     "ci_passing": false,
     "issues": [],
     "suggestions": [],
     "summary": "Code looks good"
-}'''
+}"""
 
         result = agent.run(42)
 
@@ -203,14 +203,14 @@ class TestReviewerAgent:
 
     def test_parse_review_response_valid_json(self, agent):
         """Test parsing valid JSON response."""
-        response = '''{
+        response = """{
     "status": "APPROVE",
     "requirements_met": true,
     "ci_passing": true,
     "issues": [],
     "suggestions": ["Add tests"],
     "summary": "Good"
-}'''
+}"""
         ci_status = CIStatus(state="success", checks={}, failed_checks=[])
 
         decision = agent._parse_review_response(response, ci_status)
@@ -230,7 +230,7 @@ class TestReviewerAgent:
 
     def test_parse_review_response_json_in_text(self, agent):
         """Test parsing JSON embedded in text."""
-        response = '''Here is my review:
+        response = """Here is my review:
 
 {
     "status": "APPROVE",
@@ -241,7 +241,7 @@ class TestReviewerAgent:
     "summary": "Looks good"
 }
 
-That's my analysis.'''
+That's my analysis."""
         ci_status = CIStatus(state="success", checks={}, failed_checks=[])
 
         decision = agent._parse_review_response(response, ci_status)

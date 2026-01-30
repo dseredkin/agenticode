@@ -126,7 +126,9 @@ class TestIssueModerator:
 
     def test_parse_classification_valid_json(self, moderator):
         """Test parsing valid JSON classification."""
-        response = '{"type": "bug", "severity": "minor", "comment": "Thanks for reporting!"}'
+        response = (
+            '{"type": "bug", "severity": "minor", "comment": "Thanks for reporting!"}'
+        )
         result = moderator._parse_classification(response)
         assert result.issue_type == "bug"
         assert result.severity == "minor"
@@ -134,9 +136,9 @@ class TestIssueModerator:
 
     def test_parse_classification_json_with_text(self, moderator):
         """Test parsing JSON wrapped in text."""
-        response = '''Here is the classification:
+        response = """Here is the classification:
 {"type": "question", "severity": "none", "comment": "Good question!"}
-Let me know if you need more help.'''
+Let me know if you need more help."""
         result = moderator._parse_classification(response)
         assert result.issue_type == "question"
         assert result.severity == "none"
@@ -176,9 +178,7 @@ Let me know if you need more help.'''
 
     def test_run_suggestion_no_labels(self, moderator, mock_github, mock_llm):
         """Test that suggestions get comment but no labels."""
-        mock_llm.generate_code.return_value = (
-            '{"type": "suggestion", "severity": "none", "comment": "Thanks for your suggestion!"}'
-        )
+        mock_llm.generate_code.return_value = '{"type": "suggestion", "severity": "none", "comment": "Thanks for your suggestion!"}'
 
         result = moderator.run(1)
 

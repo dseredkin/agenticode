@@ -4,7 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agents.code_agent import CodeAgent, GeneratedFile, GenerationResult, IterationResult
+from agents.code_agent import (
+    CodeAgent,
+    GeneratedFile,
+    GenerationResult,
+    IterationResult,
+)
 from agents.utils.github_client import IssueDetails
 
 
@@ -84,7 +89,9 @@ def hello() -> str:
         formatter.validate_all.return_value = MagicMock(
             success=True,
             all_errors=[],
-            black_result=MagicMock(formatted_code="def hello() -> str:\n    return 'Hello'"),
+            black_result=MagicMock(
+                formatted_code="def hello() -> str:\n    return 'Hello'"
+            ),
         )
         return formatter
 
@@ -131,7 +138,7 @@ def hello() -> str:
 
     def test_parse_code_response(self, agent):
         """Test parsing LLM response."""
-        response = '''Here is the code:
+        response = """Here is the code:
 
 ```python
 # src/module.py
@@ -146,7 +153,7 @@ And here is another file:
 def test_greet():
     assert greet("World") == "Hello, World"
 ```
-'''
+"""
         files = agent._parse_code_response(response)
 
         assert len(files) == 2
@@ -155,10 +162,10 @@ def test_greet():
 
     def test_parse_code_response_no_filename(self, agent):
         """Test parsing response without filename comments."""
-        response = '''```python
+        response = """```python
 def hello():
     pass
-```'''
+```"""
         files = agent._parse_code_response(response)
 
         assert len(files) == 1
@@ -207,14 +214,14 @@ class TestCodeAgentIntegration:
         mock_github_cls.return_value = mock_github
 
         mock_llm = MagicMock()
-        mock_llm.generate_code.return_value = '''```python
+        mock_llm.generate_code.return_value = """```python
 # src/calculator.py
 def add(a: int, b: int) -> int:
     return a + b
 
 def subtract(a: int, b: int) -> int:
     return a - b
-```'''
+```"""
         mock_llm_cls.return_value = mock_llm
 
         mock_formatter = MagicMock()

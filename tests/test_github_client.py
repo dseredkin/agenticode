@@ -82,9 +82,7 @@ class TestGitHubClient:
         """Test reading non-existent file."""
         from github import GithubException
 
-        github_client._repo.get_contents.side_effect = GithubException(
-            404, {}, None
-        )
+        github_client._repo.get_contents.side_effect = GithubException(404, {}, None)
 
         result = github_client.get_file_content("missing.py")
 

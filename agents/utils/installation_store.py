@@ -35,9 +35,11 @@ class Installation:
             account_login=row["account_login"],
             account_type=row["account_type"],
             created_at=datetime.fromisoformat(row["created_at"]),
-            suspended_at=datetime.fromisoformat(row["suspended_at"])
-            if row["suspended_at"]
-            else None,
+            suspended_at=(
+                datetime.fromisoformat(row["suspended_at"])
+                if row["suspended_at"]
+                else None
+            ),
         )
 
 
@@ -328,7 +330,9 @@ class InstallationStore:
                 )
                 removed += cursor.rowcount
 
-        logger.info(f"Removed {removed} repositories from installation {installation_id}")
+        logger.info(
+            f"Removed {removed} repositories from installation {installation_id}"
+        )
         return removed
 
     def get_repositories(self, installation_id: int) -> list[InstallationRepository]:
