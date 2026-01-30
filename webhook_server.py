@@ -34,9 +34,9 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1MB
 
 # Rate limiting configuration
-# Default: 60 requests/minute globally, 30/minute per installation
-RATE_LIMIT_GLOBAL = os.environ.get("RATE_LIMIT_GLOBAL", "60/minute")
-RATE_LIMIT_PER_INSTALLATION = os.environ.get("RATE_LIMIT_PER_INSTALLATION", "30/minute")
+# High defaults for webhook burst traffic (3000+ simultaneous webhooks)
+RATE_LIMIT_GLOBAL = os.environ.get("RATE_LIMIT_GLOBAL", "5000/minute")
+RATE_LIMIT_PER_INSTALLATION = os.environ.get("RATE_LIMIT_PER_INSTALLATION", "1000/minute")
 
 
 def get_installation_id_for_limit() -> str:
@@ -83,9 +83,10 @@ def request_too_large(e):
     }), 413
 
 
-# Start embedded task consumer (no separate worker needed)
-_embed_worker = os.environ.get("ENABLE_EMBEDDED_WORKER", "true").lower()
-if _embed_worker == "true":
+# Consumer startup is handled by gunicorn.conf.py post_fork hook when using gunicorn.
+# For local development without gunicorn, set ENABLE_EMBEDDED_WORKER_STARTUP=true
+_startup_consumer = os.environ.get("ENABLE_EMBEDDED_WORKER_STARTUP", "false").lower()
+if _startup_consumer == "true":
     _num_workers = int(os.environ.get("QUEUE_WORKERS", "12"))
     start_consumer_thread(workers=_num_workers)
 

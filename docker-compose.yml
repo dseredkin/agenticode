@@ -30,9 +30,12 @@ services:
       - WEBHOOK_PORT=8000
       - REDIS_URL=redis://redis:6379/0
       - ENABLE_EMBEDDED_WORKER=true
+      - WEB_WORKERS=4
+      - WORKER_CONNECTIONS=1000
+      - QUEUE_WORKERS=12
     depends_on:
       - redis
-    command: uv run python webhook_server.py
+    command: uv run gunicorn -c gunicorn.conf.py webhook_server:app
     restart: unless-stopped
 
   # For scaling: disable embedded worker and use dedicated workers

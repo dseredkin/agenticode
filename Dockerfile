@@ -20,4 +20,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uv", "run", "gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "600", "webhook_server:app"]
+CMD ["uv", "run", "gunicorn", "-c", "gunicorn.conf.py", "webhook_server:app"]
