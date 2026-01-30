@@ -3,7 +3,7 @@
 import os
 
 # Worker configuration
-worker_class = "gevent"
+worker_class = "sync"
 workers = int(os.environ.get("WEB_WORKERS", "4"))
 worker_connections = int(os.environ.get("WORKER_CONNECTIONS", "1000"))
 
