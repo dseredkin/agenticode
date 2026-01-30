@@ -374,6 +374,7 @@ class LLMClient:
         prompt: str,
         context: str | None = None,
         system_prompt: str | None = None,
+        temperature: float = 0.3,
     ) -> str:
         """Generate code using the LLM.
 
@@ -381,6 +382,7 @@ class LLMClient:
             prompt: The code generation prompt.
             context: Optional context (existing code, requirements, etc.).
             system_prompt: Optional system prompt override.
+            temperature: Sampling temperature.
 
         Returns:
             Generated code as a string.
@@ -392,7 +394,7 @@ class LLMClient:
         response = self.generate(
             prompt=full_prompt,
             system_prompt=system_prompt,
-            temperature=0.3,
+            temperature=temperature,
             max_tokens=4096,
         )
 
