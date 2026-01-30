@@ -8,7 +8,12 @@ import os
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 
-from agents.task_queue import TaskQueueManager
+from agents.task_queue import (
+    QueueConnectionError,
+    QueueEnqueueError,
+    QueueError,
+    TaskQueueManager,
+)
 
 load_dotenv()
 
@@ -59,10 +64,15 @@ def health():
     """Health check endpoint."""
     try:
         qm = get_queue_manager()
-        stats = qm.get_queue_stats()
-        return jsonify({"status": "ok", "queue": stats})
+        if qm.is_healthy():
+            stats = qm.get_queue_stats()
+            return jsonify({"status": "ok", "queue": stats})
+        return jsonify({"status": "degraded", "error": "Redis not reachable"}), 503
+    except QueueConnectionError as e:
+        return jsonify({"status": "degraded", "error": str(e)}), 503
     except Exception as e:
-        return jsonify({"status": "degraded", "error": str(e)})
+        logger.error(f"Health check failed: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 
 @app.route("/webhook", methods=["POST"])
@@ -84,18 +94,40 @@ def webhook():
 
     logger.info(f"[{delivery_id}] Received event: {event}")
 
-    if event == "issues":
-        return handle_issue_event(payload, delivery_id)
-    elif event == "pull_request":
-        return handle_pr_event(payload, delivery_id)
-    elif event == "pull_request_review":
-        return handle_pr_review_event(payload, delivery_id)
-    elif event == "ping":
-        logger.info(f"[{delivery_id}] Ping received from GitHub")
-        return jsonify({"status": "pong"})
-    else:
-        logger.info(f"[{delivery_id}] Ignoring event: {event}")
-        return jsonify({"status": "ignored", "event": event})
+    try:
+        if event == "issues":
+            return handle_issue_event(payload, delivery_id)
+        elif event == "pull_request":
+            return handle_pr_event(payload, delivery_id)
+        elif event == "pull_request_review":
+            return handle_pr_review_event(payload, delivery_id)
+        elif event == "ping":
+            logger.info(f"[{delivery_id}] Ping received from GitHub")
+            return jsonify({"status": "pong"})
+        else:
+            logger.info(f"[{delivery_id}] Ignoring event: {event}")
+            return jsonify({"status": "ignored", "event": event})
+    except QueueConnectionError as e:
+        logger.error(f"[{delivery_id}] Queue connection error: {e}")
+        return jsonify({
+            "status": "error",
+            "error": "Queue unavailable",
+            "details": str(e),
+        }), 503
+    except QueueEnqueueError as e:
+        logger.error(f"[{delivery_id}] Failed to enqueue: {e}")
+        return jsonify({
+            "status": "error",
+            "error": "Failed to queue task",
+            "details": str(e),
+        }), 503
+    except Exception as e:
+        logger.error(f"[{delivery_id}] Unexpected error: {e}")
+        return jsonify({
+            "status": "error",
+            "error": "Internal error",
+            "details": str(e),
+        }), 500
 
 
 def handle_issue_event(payload: dict, delivery_id: str):
@@ -103,7 +135,7 @@ def handle_issue_event(payload: dict, delivery_id: str):
 
     Flow:
     - Issue with 'auto-generate' label -> Code Agent creates PR
-    - New issue without 'auto-generate' -> Issue Moderator classifies and responds
+    - New issue without 'auto-generate' -> Issue Moderator classifies
     """
     action = payload.get("action", "")
     issue = payload.get("issue", {})
@@ -251,70 +283,110 @@ def get_iteration_from_labels(labels: list[str]) -> int:
 @app.route("/queue/stats", methods=["GET"])
 def queue_stats():
     """Get queue statistics."""
-    qm = get_queue_manager()
-    return jsonify(qm.get_queue_stats())
+    try:
+        qm = get_queue_manager()
+        return jsonify(qm.get_queue_stats())
+    except QueueError as e:
+        return jsonify({"error": "Queue unavailable", "details": str(e)}), 503
+    except Exception as e:
+        logger.error(f"Failed to get queue stats: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @app.route("/queue/job/<job_id>", methods=["GET"])
 def job_status(job_id: str):
     """Get status of a specific job."""
-    qm = get_queue_manager()
-    status = qm.get_job_status(job_id)
-    if status:
-        return jsonify(status)
-    return jsonify({"error": "Job not found"}), 404
+    try:
+        qm = get_queue_manager()
+        status = qm.get_job_status(job_id)
+        if status:
+            return jsonify(status)
+        return jsonify({"error": "Job not found"}), 404
+    except QueueError as e:
+        return jsonify({"error": "Queue unavailable", "details": str(e)}), 503
+    except Exception as e:
+        logger.error(f"Failed to get job status: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @app.route("/trigger/issue/<int:issue_number>/moderate", methods=["POST"])
 def trigger_issue_moderate(issue_number: int):
     """Manually trigger Issue Moderator to classify an issue."""
-    qm = get_queue_manager()
-    job = qm.enqueue_issue_moderate(issue_number, deduplicate=False)
-    return jsonify({
-        "status": "queued",
-        "agent": "issue_moderator",
-        "issue": issue_number,
-        "job_id": job.id if job else None,
-    })
+    try:
+        qm = get_queue_manager()
+        job = qm.enqueue_issue_moderate(issue_number, deduplicate=False)
+        return jsonify({
+            "status": "queued",
+            "agent": "issue_moderator",
+            "issue": issue_number,
+            "job_id": job.id if job else None,
+        })
+    except QueueError as e:
+        return jsonify({
+            "status": "error",
+            "error": "Queue unavailable",
+            "details": str(e),
+        }), 503
 
 
 @app.route("/trigger/issue/<int:issue_number>/generate", methods=["POST"])
 def trigger_issue_generate(issue_number: int):
     """Manually trigger Code Agent to generate code from an issue."""
-    qm = get_queue_manager()
-    job = qm.enqueue_code_generation(issue_number, deduplicate=False)
-    return jsonify({
-        "status": "queued",
-        "agent": "code_agent",
-        "issue": issue_number,
-        "job_id": job.id if job else None,
-    })
+    try:
+        qm = get_queue_manager()
+        job = qm.enqueue_code_generation(issue_number, deduplicate=False)
+        return jsonify({
+            "status": "queued",
+            "agent": "code_agent",
+            "issue": issue_number,
+            "job_id": job.id if job else None,
+        })
+    except QueueError as e:
+        return jsonify({
+            "status": "error",
+            "error": "Queue unavailable",
+            "details": str(e),
+        }), 503
 
 
 @app.route("/trigger/pr/<int:pr_number>/review", methods=["POST"])
 def trigger_pr_review(pr_number: int):
     """Manually trigger Reviewer Agent for a PR."""
-    qm = get_queue_manager()
-    job = qm.enqueue_pr_review(pr_number, deduplicate=False)
-    return jsonify({
-        "status": "queued",
-        "agent": "reviewer_agent",
-        "pr": pr_number,
-        "job_id": job.id if job else None,
-    })
+    try:
+        qm = get_queue_manager()
+        job = qm.enqueue_pr_review(pr_number, deduplicate=False)
+        return jsonify({
+            "status": "queued",
+            "agent": "reviewer_agent",
+            "pr": pr_number,
+            "job_id": job.id if job else None,
+        })
+    except QueueError as e:
+        return jsonify({
+            "status": "error",
+            "error": "Queue unavailable",
+            "details": str(e),
+        }), 503
 
 
 @app.route("/trigger/pr/<int:pr_number>/iterate", methods=["POST"])
 def trigger_pr_iteration(pr_number: int):
     """Manually trigger Code Agent to iterate on PR feedback."""
-    qm = get_queue_manager()
-    job = qm.enqueue_pr_iteration(pr_number, deduplicate=False)
-    return jsonify({
-        "status": "queued",
-        "agent": "code_agent",
-        "pr": pr_number,
-        "job_id": job.id if job else None,
-    })
+    try:
+        qm = get_queue_manager()
+        job = qm.enqueue_pr_iteration(pr_number, deduplicate=False)
+        return jsonify({
+            "status": "queued",
+            "agent": "code_agent",
+            "pr": pr_number,
+            "job_id": job.id if job else None,
+        })
+    except QueueError as e:
+        return jsonify({
+            "status": "error",
+            "error": "Queue unavailable",
+            "details": str(e),
+        }), 503
 
 
 if __name__ == "__main__":

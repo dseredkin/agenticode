@@ -17,14 +17,21 @@ from agents.task_queue import (
 class TestQueueConfig:
     """Tests for QueueConfig dataclass."""
 
-    def test_default_config(self):
+    def test_default_config(self, monkeypatch):
         """Test default configuration values."""
+        monkeypatch.delenv("REDIS_URL", raising=False)
         config = QueueConfig()
         assert config.redis_url == "redis://localhost:6379"
         assert config.default_timeout == 600
         assert config.result_ttl == 3600
         assert config.failure_ttl == 86400
         assert config.max_retries == 3
+
+    def test_config_from_env(self, monkeypatch):
+        """Test configuration reads REDIS_URL from environment."""
+        monkeypatch.setenv("REDIS_URL", "redis://from-env:6379")
+        config = QueueConfig()
+        assert config.redis_url == "redis://from-env:6379"
 
     def test_custom_config(self):
         """Test custom configuration values."""
