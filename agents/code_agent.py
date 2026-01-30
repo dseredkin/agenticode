@@ -406,7 +406,7 @@ class CodeAgent:
 
         # Parallel fetch file contents for keyword matching
         file_contents: dict[str, str] = {}
-        files_to_check = python_files[:10]
+        files_to_check = python_files[:30]
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_path = {
@@ -431,7 +431,7 @@ class CodeAgent:
 
         # Return relevant files (already fetched, no need to re-fetch)
         result: dict[str, str] = {}
-        for file_path in relevant_files[:5]:
+        for file_path in relevant_files[:10]:
             if file_path in file_contents:
                 result[file_path] = file_contents[file_path]
 

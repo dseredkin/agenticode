@@ -206,9 +206,9 @@ def format_code_generation_prompt(
     Returns:
         Formatted prompt string.
     """
-    structure_str = "\n".join(f"- {f}" for f in repo_structure[:50])
-    if len(repo_structure) > 50:
-        structure_str += f"\n... and {len(repo_structure) - 50} more files"
+    structure_str = "\n".join(f"- {f}" for f in repo_structure[:100])
+    if len(repo_structure) > 100:
+        structure_str += f"\n... and {len(repo_structure) - 100} more files"
 
     code_context = ""
     if existing_code:
