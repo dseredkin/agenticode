@@ -110,6 +110,7 @@ def start_consumer_thread(workers: int = 48) -> None:
                 huey,
                 workers=workers,
                 worker_type="thread",
+                setup_signals=False,
             )
             _consumer_started.set()
             logger.info(f"[Queue] Starting embedded consumer with {workers} workers")
