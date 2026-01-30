@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from typing import Any
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -362,7 +363,7 @@ def main() -> None:
     result = agent.run(args.pr, wait_for_ci=not args.no_wait_ci)
 
     if args.output_json:
-        output = {
+        output: dict[str, Any] = {
             "success": result.success,
             "error": result.error,
         }

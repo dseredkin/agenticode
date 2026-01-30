@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -346,7 +347,7 @@ def main() -> None:
     result = moderator.run(args.issue)
 
     if args.output_json:
-        output = {
+        output: dict[str, Any] = {
             "success": result.success,
             "issue_number": result.issue_number,
             "error": result.error,

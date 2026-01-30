@@ -444,7 +444,7 @@ class GitHubClient:
                     )
 
         if review_comments:
-            pr.create_review(body=body, event=event, comments=review_comments)
+            pr.create_review(body=body, event=event, comments=review_comments)  # type: ignore[arg-type]
         else:
             pr.create_review(body=body, event=event)
 

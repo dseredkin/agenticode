@@ -10,9 +10,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from huey import SqliteHuey
-from huey.api import Result
-from huey.consumer import Consumer
+from huey import SqliteHuey  # type: ignore[import-untyped]
+from huey.api import Result  # type: ignore[import-untyped]
+from huey.consumer import Consumer  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +124,12 @@ def start_consumer_thread(workers: int = 2) -> None:
         logger.warning("[Queue] Consumer may not have started properly")
 
 
-@huey.task(retries=3, retry_delay=60)
+@huey.task(retries=3, retry_delay=60)  # type: ignore[untyped-decorator]
 def run_issue_moderator(
     issue_number: int,
     installation_id: int | None = None,
     repository: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Task: Run issue moderator on an issue.
 
     After classification, automatically triggers code generation for bugs.
@@ -193,12 +193,12 @@ def run_issue_moderator(
         }
 
 
-@huey.task(retries=3, retry_delay=60)
+@huey.task(retries=3, retry_delay=60)  # type: ignore[untyped-decorator]
 def run_code_agent_issue(
     issue_number: int,
     installation_id: int | None = None,
     repository: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Task: Run code agent to generate code from an issue.
 
     Args:
@@ -243,12 +243,12 @@ def run_code_agent_issue(
         }
 
 
-@huey.task(retries=3, retry_delay=60)
+@huey.task(retries=3, retry_delay=60)  # type: ignore[untyped-decorator]
 def run_code_agent_pr(
     pr_number: int,
     installation_id: int | None = None,
     repository: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Task: Run code agent to iterate on PR feedback.
 
     Args:
@@ -289,12 +289,12 @@ def run_code_agent_pr(
         }
 
 
-@huey.task(retries=3, retry_delay=60)
+@huey.task(retries=3, retry_delay=60)  # type: ignore[untyped-decorator]
 def run_reviewer_agent(
     pr_number: int,
     installation_id: int | None = None,
     repository: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Task: Run reviewer agent on a PR.
 
     Args:
@@ -549,7 +549,7 @@ class TaskQueueManager:
             logger.error(f"Failed to enqueue PR iteration: {e}")
             raise QueueEnqueueError(f"Failed to enqueue: {e}") from e
 
-    def get_job_status(self, task_id: str) -> dict | None:
+    def get_job_status(self, task_id: str) -> dict[str, Any] | None:
         """Get status of a task.
 
         Args:
@@ -580,7 +580,7 @@ class TaskQueueManager:
         except Exception:
             return None
 
-    def get_queue_stats(self) -> dict:
+    def get_queue_stats(self) -> dict[str, int]:
         """Get queue statistics.
 
         Returns:

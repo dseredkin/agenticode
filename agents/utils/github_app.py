@@ -57,7 +57,7 @@ def get_installation_token(
     response.raise_for_status()
 
     data = response.json()
-    token = data["token"]
+    token: str = data["token"]
     expires_at = data.get("expires_at", "unknown")
     logger.info(f"Generated installation token (expires: {expires_at})")
 
@@ -93,7 +93,7 @@ def get_app_token_from_env() -> str | None:
     private_key_env = os.environ.get("GITHUB_APP_PRIVATE_KEY")
     installation_id = os.environ.get("GITHUB_APP_INSTALLATION_ID")
 
-    if not all([app_id, private_key_env, installation_id]):
+    if not app_id or not private_key_env or not installation_id:
         return None
 
     # Check if it's a path or the key content
