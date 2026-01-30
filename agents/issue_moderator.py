@@ -111,12 +111,18 @@ class IssueModerator:
             installation_id: GitHub App installation ID (for multi-tenant support).
             repository: Repository in owner/repo format.
         """
+        # Use contributor app credentials if available
+        contributor_app_id = os.environ.get("GITHUB_APP_CONTRIBUTOR_ID")
+        contributor_app_key = os.environ.get("GITHUB_APP_CONTRIBUTOR_PRIVATE_KEY")
+
         if github_client:
             self._github = github_client
         elif installation_id:
             self._github = GitHubClient(
                 installation_id=installation_id,
                 repository=repository,
+                app_id=contributor_app_id,
+                app_private_key=contributor_app_key,
             )
         else:
             token = os.environ.get("GITHUB_TOKEN")

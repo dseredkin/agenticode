@@ -71,6 +71,8 @@ class GitHubClient:
         token: str | None = None,
         repository: str | None = None,
         installation_id: int | None = None,
+        app_id: str | None = None,
+        app_private_key: str | None = None,
     ) -> None:
         """Initialize GitHub client.
 
@@ -79,9 +81,13 @@ class GitHubClient:
             repository: Repository in owner/repo format. Defaults to GITHUB_REPOSITORY env var.
             installation_id: GitHub App installation ID for installation-based auth.
                 If provided with GitHub App credentials, generates installation token.
+            app_id: GitHub App ID. Defaults to GITHUB_APP_ID env var.
+            app_private_key: GitHub App private key. Defaults to GITHUB_APP_PRIVATE_KEY env var.
         """
         self._installation_id = installation_id
         self._repository = repository or os.environ.get("GITHUB_REPOSITORY", "")
+        self._app_id = app_id
+        self._app_private_key = app_private_key
 
         # Try installation-based auth first if installation_id provided
         if installation_id:
@@ -110,8 +116,10 @@ class GitHubClient:
         Raises:
             ValueError: If GitHub App credentials not configured.
         """
-        app_id = os.environ.get("GITHUB_APP_ID")
-        private_key_env = os.environ.get("GITHUB_APP_PRIVATE_KEY")
+        app_id = self._app_id or os.environ.get("GITHUB_APP_ID")
+        private_key_env = self._app_private_key or os.environ.get(
+            "GITHUB_APP_PRIVATE_KEY"
+        )
 
         if not app_id or not private_key_env:
             raise ValueError(
@@ -134,17 +142,26 @@ class GitHubClient:
         cls,
         installation_id: int,
         repository: str,
+        app_id: str | None = None,
+        app_private_key: str | None = None,
     ) -> "GitHubClient":
         """Create a GitHubClient for a specific installation and repository.
 
         Args:
             installation_id: GitHub App installation ID.
             repository: Repository in owner/repo format.
+            app_id: GitHub App ID. Defaults to GITHUB_APP_ID env var.
+            app_private_key: GitHub App private key. Defaults to GITHUB_APP_PRIVATE_KEY env var.
 
         Returns:
             GitHubClient instance configured for the installation.
         """
-        return cls(installation_id=installation_id, repository=repository)
+        return cls(
+            installation_id=installation_id,
+            repository=repository,
+            app_id=app_id,
+            app_private_key=app_private_key,
+        )
 
     @property
     def installation_id(self) -> int | None:

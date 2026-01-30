@@ -76,12 +76,18 @@ class ReviewerAgent:
             installation_id: GitHub App installation ID (for multi-tenant support).
             repository: Repository in owner/repo format.
         """
+        # Use separate reviewer app credentials if available
+        reviewer_app_id = os.environ.get("GITHUB_APP_REVIEWER_ID")
+        reviewer_app_key = os.environ.get("GITHUB_APP_REVIEWER_PRIVATE_KEY")
+
         if github_client:
             self._github = github_client
         elif installation_id:
             self._github = GitHubClient(
                 installation_id=installation_id,
                 repository=repository,
+                app_id=reviewer_app_id,
+                app_private_key=reviewer_app_key,
             )
         else:
             from agents.utils.github_app import get_app_token_from_env
@@ -326,7 +332,20 @@ class ReviewerAgent:
                 )
             )
 
-        self._github.post_review(pr_number, body, event, review_comments or None)
+        try:
+            self._github.post_review(pr_number, body, event, review_comments or None)
+        except Exception as e:
+            # Can't request changes on own PR - fall back to COMMENT
+            if "own pull request" in str(e).lower() and event == "REQUEST_CHANGES":
+                logger.warning(
+                    f"Cannot request changes on own PR, posting as COMMENT instead"
+                )
+                self._github.post_review(
+                    pr_number, body, "COMMENT", review_comments or None
+                )
+                event = "COMMENT"
+            else:
+                raise
 
         logger.info(f"Posted {event} review on PR #{pr_number}")
         if review_comments:
