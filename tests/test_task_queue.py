@@ -14,6 +14,14 @@ from agents.task_queue import (
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_huey():
+    """Mock huey to avoid Redis connection."""
+    with patch("agents.task_queue.huey") as mock:
+        mock.pending.return_value = []
+        yield mock
+
+
 class TestQueueConfig:
     """Tests for QueueConfig dataclass."""
 
@@ -56,8 +64,9 @@ class TestTaskType:
 class TestTaskFunctions:
     """Tests for task worker functions."""
 
+    @patch("agents.task_queue.run_code_agent_issue")
     @patch("agents.issue_moderator.IssueModerator")
-    def test_run_issue_moderator(self, mock_moderator_class):
+    def test_run_issue_moderator(self, mock_moderator_class, mock_code_agent):
         """Test issue moderator task function."""
         mock_moderator = MagicMock()
         mock_moderator.run.return_value = MagicMock(
@@ -71,6 +80,7 @@ class TestTaskFunctions:
             ),
         )
         mock_moderator_class.return_value = mock_moderator
+        mock_code_agent.return_value = MagicMock()
 
         result = run_issue_moderator.call_local(123)
 
@@ -131,7 +141,11 @@ class TestTaskQueueManager:
     @pytest.fixture
     def manager(self, redis_url):
         """Create TaskQueueManager with test Redis URL."""
-        return TaskQueueManager(redis_url=redis_url)
+        with patch("agents.task_queue.get_huey") as mock_get_huey:
+            mock_huey = MagicMock()
+            mock_huey.pending.return_value = []
+            mock_get_huey.return_value = mock_huey
+            yield TaskQueueManager(redis_url=redis_url)
 
     def test_get_task_id(self, manager):
         """Test task ID generation."""
@@ -158,11 +172,14 @@ class TestTaskQueueManager:
         manager._unmark_processing(task_id)
         assert not manager._is_processing(task_id)
 
-    def test_enqueue_issue_moderate(self, manager):
+    @patch("agents.task_queue.run_issue_moderator")
+    def test_enqueue_issue_moderate(self, mock_task, manager):
         """Test enqueueing issue moderation."""
+        mock_task.return_value = MagicMock()
         result = manager.enqueue_issue_moderate(123)
 
         assert result is not None
+        mock_task.assert_called_once()
 
     def test_enqueue_issue_moderate_deduplicate(self, manager):
         """Test deduplication prevents duplicate tasks."""
@@ -172,23 +189,32 @@ class TestTaskQueueManager:
 
         assert result is None
 
-    def test_enqueue_code_generation(self, manager):
+    @patch("agents.task_queue.run_code_agent_issue")
+    def test_enqueue_code_generation(self, mock_task, manager):
         """Test enqueueing code generation."""
+        mock_task.return_value = MagicMock()
         result = manager.enqueue_code_generation(456)
 
         assert result is not None
+        mock_task.assert_called_once()
 
-    def test_enqueue_pr_review(self, manager):
+    @patch("agents.task_queue.run_reviewer_agent")
+    def test_enqueue_pr_review(self, mock_task, manager):
         """Test enqueueing PR review."""
+        mock_task.return_value = MagicMock()
         result = manager.enqueue_pr_review(789)
 
         assert result is not None
+        mock_task.assert_called_once()
 
-    def test_enqueue_pr_iteration(self, manager):
+    @patch("agents.task_queue.run_code_agent_pr")
+    def test_enqueue_pr_iteration(self, mock_task, manager):
         """Test enqueueing PR iteration."""
+        mock_task.return_value = MagicMock()
         result = manager.enqueue_pr_iteration(101)
 
         assert result is not None
+        mock_task.assert_called_once()
 
     def test_get_queue_stats(self, manager):
         """Test getting queue statistics."""
@@ -210,9 +236,19 @@ class TestDeduplication:
         """Create a test Redis URL."""
         return "redis://localhost:6379/15"
 
-    def test_deduplicate_multiple_same_issues(self, redis_url):
+    @pytest.fixture
+    def manager(self, redis_url):
+        """Create TaskQueueManager with mocked huey."""
+        with patch("agents.task_queue.get_huey") as mock_get_huey:
+            mock_huey = MagicMock()
+            mock_huey.pending.return_value = []
+            mock_get_huey.return_value = mock_huey
+            yield TaskQueueManager(redis_url=redis_url)
+
+    @patch("agents.task_queue.run_issue_moderator")
+    def test_deduplicate_multiple_same_issues(self, mock_task, manager):
         """Test that same issue is not queued multiple times."""
-        manager = TaskQueueManager(redis_url=redis_url)
+        mock_task.return_value = MagicMock()
 
         result1 = manager.enqueue_issue_moderate(1)
         result2 = manager.enqueue_issue_moderate(1)
@@ -222,17 +258,23 @@ class TestDeduplication:
         assert result2 is None
         assert result3 is None
 
-    def test_different_issues_queued_separately(self, redis_url):
+    @patch("agents.task_queue.run_issue_moderator")
+    def test_different_issues_queued_separately(self, mock_task, manager):
         """Test that different issues are queued separately."""
-        manager = TaskQueueManager(redis_url=redis_url)
+        mock_task.return_value = MagicMock()
 
         results = [manager.enqueue_issue_moderate(i) for i in range(1, 6)]
 
         assert all(result is not None for result in results)
 
-    def test_same_issue_different_task_types(self, redis_url):
+    @patch("agents.task_queue.run_code_agent_issue")
+    @patch("agents.task_queue.run_issue_moderator")
+    def test_same_issue_different_task_types(
+        self, mock_moderate, mock_generate, manager
+    ):
         """Test same issue can be queued for different task types."""
-        manager = TaskQueueManager(redis_url=redis_url)
+        mock_moderate.return_value = MagicMock()
+        mock_generate.return_value = MagicMock()
 
         result1 = manager.enqueue_issue_moderate(1)
         result2 = manager.enqueue_code_generation(1)
