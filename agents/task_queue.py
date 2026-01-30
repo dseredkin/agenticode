@@ -100,6 +100,15 @@ def start_consumer_thread(workers: int = 2) -> None:
         logger.info("[Queue] Consumer already running")
         return
 
+    # Clear any pending tasks from previous runs
+    try:
+        pending_count = len(huey.pending())
+        if pending_count > 0:
+            logger.info(f"[Queue] Clearing {pending_count} pending tasks from previous run")
+            huey.flush()
+    except Exception as e:
+        logger.warning(f"[Queue] Failed to clear pending tasks: {e}")
+
     def run_consumer() -> None:
         try:
             consumer = Consumer(
