@@ -2,12 +2,12 @@ name: agenticode
 region: nyc
 services:
   - name: webhook-server
-    dockerfile_path: /Dockerfile
+    dockerfile_path: Dockerfile
     source_dir: /
     github:
       branch: main
       deploy_on_push: true
-      repo: ${GITHUB_REPO}
+      repo: dseredkin/agenticode
     http_port: 8000
     instance_count: 1
     instance_size_slug: basic-xxs
