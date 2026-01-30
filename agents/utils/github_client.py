@@ -242,16 +242,18 @@ class GitHubClient:
         except GithubException:
             return None
 
-    def create_branch(self, branch_name: str, base_branch: str = "main") -> str:
+    def create_branch(self, branch_name: str, base_branch: str | None = None) -> str:
         """Create a new branch.
 
         Args:
             branch_name: Name for the new branch.
-            base_branch: Base branch to create from.
+            base_branch: Base branch to create from. If None, uses repo default.
 
         Returns:
             The full ref name of the created branch.
         """
+        if base_branch is None:
+            base_branch = self._repo.default_branch
         base_ref = self._repo.get_git_ref(f"heads/{base_branch}")
         ref_name = f"refs/heads/{branch_name}"
 
@@ -324,7 +326,7 @@ class GitHubClient:
         title: str,
         body: str,
         head_branch: str,
-        base_branch: str = "main",
+        base_branch: str | None = None,
     ) -> int:
         """Create a pull request.
 
@@ -332,11 +334,13 @@ class GitHubClient:
             title: PR title.
             body: PR description.
             head_branch: Source branch.
-            base_branch: Target branch.
+            base_branch: Target branch. If None, uses repo default.
 
         Returns:
             The PR number.
         """
+        if base_branch is None:
+            base_branch = self._repo.default_branch
         pr = self._repo.create_pull(
             title=title,
             body=body,
