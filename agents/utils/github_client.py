@@ -477,6 +477,25 @@ class GitHubClient:
         issue.create_comment(body)
         logger.info(f"Posted comment on #{issue_or_pr_number}")
 
+    def get_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:
+        """Get all comments on an issue.
+
+        Args:
+            issue_number: The issue number.
+
+        Returns:
+            List of comment dictionaries with body and user.
+        """
+        issue = self._repo.get_issue(issue_number)
+        comments: list[dict[str, Any]] = []
+        for comment in issue.get_comments():
+            comments.append({
+                "id": comment.id,
+                "body": comment.body,
+                "user": comment.user.login if comment.user else "unknown",
+            })
+        return comments
+
     def remove_label(self, issue_or_pr_number: int, label: str) -> None:
         """Remove a label from an issue or PR.
 
