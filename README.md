@@ -21,7 +21,6 @@ Using separate GitHub Apps ensures that the Code Agent cannot approve its own PR
 
 1. Visit the app pages above and click "Install"
 2. Select the repositories you want to enable AgentiCode for
-3. Configure the webhook URL to point to your AgentiCode server
 
 ## Features
 
