@@ -78,7 +78,7 @@ def get_huey(redis_url: str | None = None) -> RedisHuey:
 huey = get_huey()
 
 
-def start_consumer_thread(workers: int = 48) -> None:
+def start_consumer_thread(workers: int = 12) -> None:
     """Start Huey consumer in a background thread.
 
     This allows running the task queue without a separate worker process.
@@ -110,6 +110,8 @@ def start_consumer_thread(workers: int = 48) -> None:
                 huey,
                 workers=workers,
                 worker_type="thread",
+                scheduler_interval=60,  # Check scheduled tasks every 60s
+                check_worker_health=False,  # Reduce Redis health checks
             )
             _consumer_started.set()
             logger.info(f"[Queue] Starting embedded consumer with {workers} workers")
